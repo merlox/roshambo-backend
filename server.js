@@ -43,13 +43,13 @@ app.post('/user', async (req, res) => {
 		let foundUser = await User.findOne({email: req.body.email})
 		// If we found a user, return a message indicating that the user already exists
 		if(foundUser) {
-			res.status(400).json({
+			return res.status(400).json({
 				ok: false,
 				message: 'The user already exists, login or try again',
 			})
 		} else {
       if (req.body.password.length < 6) {
-        res.status(400).json({
+        return res.status(400).json({
   				ok: false,
   				message: 'The password must be at least 6 characters',
   			})
@@ -71,16 +71,13 @@ app.post('/user', async (req, res) => {
 				// If the user was added successful, return the user credentials
 				return res.status(200).json({
 					ok: true,
-					message: {
-						email: req.body.email,
-						password: req.body.password,
-						token,
-					}
+          message: 'User created successfully',
+					token,
 				})
 			})
 		}
 	} catch(err) {
-		res.status(400).json({
+		return res.status(400).json({
 			ok: false,
 			message: 'There was an error processing your request, try again',
 		})
