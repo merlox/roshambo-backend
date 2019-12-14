@@ -152,7 +152,7 @@ app.post('/user/login', async (req, res) => {
 		if(foundUser) {
 			foundUser.comparePassword(req.body.password, (isMatch) => {
 				if(!isMatch) {
-					res.status(400).json({
+					return res.status(400).json({
 						ok: false,
 						message: 'User found but the password is invalid',
 					})
@@ -160,22 +160,19 @@ app.post('/user/login', async (req, res) => {
 					const token = jwt.sign({userId: foundUser._id}, process.env.SALT)
 					return res.status(200).json({
 						ok: true,
-						message: {
-							email: foundUser.email,
-							password: req.body.password,
-							token,
-						}
+            message: 'User logged in successfully',
+            token,
 					})
 				}
 			})
 		} else {
-			res.status(400).json({
+			return res.status(400).json({
 				ok: false,
 				message: 'User not found',
 			})
 		}
 	} catch(err) {
-		res.status(400).json({
+		return res.status(400).json({
 			ok: false,
 			message: 'Invalid password or email',
 		})
