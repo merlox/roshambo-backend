@@ -9,10 +9,13 @@ const app = express()
 const jwt = require('jsonwebtoken')
 const User = require('./src/user')
 const ForgotPasswordToken = require('./src/forgotPasswordToken')
-const setup = require('./src/setup')
+const Game = require('./src/game')
 const bcrypt = require('bcrypt')
 const yargs = require('yargs')
 const sendEmail = require('./src/sendEmail')
+const mongoose = require('mongoose')
+const session = require('express-session')
+const MongoStore = require('connect-mongo')(session)
 const argv = yargs.option('port', {
     alias: 'p',
     description: 'Set the port to run this server on',
@@ -26,7 +29,28 @@ const port = argv.port
 
 // This is to simplify everything but you should set it from the terminal
 // required to encrypt user accounts
-process.env.SALT = 'express'
+process.env.SALT = 'example-merlox120'
+mongoose.connect('mongodb://localhost:27017/authentication', {
+	useNewUrlParser: true,
+	useCreateIndex: true,
+})
+mongoose.connection.on('error', err => {
+	console.log('Error connecting to the database', err)
+})
+mongoose.connection.once('open', function() {
+  console.log('Opened database connection')
+})
+app.use(session({
+  secret: process.env.SALT,
+  resave: true,
+  unset: 'destroy',
+  saveUninitialized: true,
+  store: new MongoStore({mongooseConnection: mongoose.connection}),
+  cookie: {
+    // Un año
+    maxAge: 1000 * 60 * 60 * 24 * 365,
+  },
+}))
 
 app.use(bodyParser.json())
 app.use(bodyParser.urlencoded({extended: true}))
@@ -45,13 +69,13 @@ app.post('/user', async (req, res) => {
 		if(foundUser) {
 			return res.status(400).json({
 				ok: false,
-				message: 'The user already exists, login or try again',
+				msg: 'The user already exists, login or try again',
 			})
 		} else {
       if (req.body.password.length < 6) {
         return res.status(400).json({
   				ok: false,
-  				message: 'The password must be at least 6 characters',
+  				msg: 'The password must be at least 6 characters',
   			})
       }
 			let newUser = new User({
@@ -59,19 +83,34 @@ app.post('/user', async (req, res) => {
 				password: req.body.password,
         username: req.body.username,
 			})
+
 			newUser.save(err => {
 				if(err) {
 					return res.status(400).json({
 						ok: false,
-						message: 'There was an error saving the new user, try again',
+						msg: 'There was an error saving the new user, try again',
 					})
 				}
 				// Create the JWT token based on that new user
 				const token = jwt.sign({userId: newUser.id}, process.env.SALT)
+
+        req.user = {
+  				email: req.body.email,
+          username: req.body.username,
+          token,
+  			}
+        req.session.user = {
+  				email: req.body.email,
+          username: req.body.username,
+          token,
+  			}
+        req.user.save()
+        req.session.save()
+
 				// If the user was added successful, return the user credentials
 				return res.status(200).json({
 					ok: true,
-          message: 'User created successfully',
+          msg: 'User created successfully',
 					token,
 				})
 			})
@@ -79,7 +118,7 @@ app.post('/user', async (req, res) => {
 	} catch(err) {
 		return res.status(400).json({
 			ok: false,
-			message: 'There was an error processing your request, try again',
+			msg: 'There was an error processing your request, try again',
 		})
 	}
 })
@@ -128,6 +167,7 @@ app.put('/user', async (req, res) => {
     // Here's the actual password update
     foundUser.password = req.body.password
     await foundUser.save()
+
     res.status(200).json({
       ok: true,
       msg: 'User updated successfully'
@@ -154,13 +194,27 @@ app.post('/user/login', async (req, res) => {
 				if(!isMatch) {
 					return res.status(400).json({
 						ok: false,
-						message: 'User found but the password is invalid',
+						msg: 'User found but the password is invalid',
 					})
 				} else {
 					const token = jwt.sign({userId: foundUser._id}, process.env.SALT)
+
+          req.user = {
+    				email: req.body.email,
+            username: foundUser.username,
+            token,
+    			}
+          req.session.user = {
+    				email: req.body.email,
+            username: foundUser.username,
+            token,
+    			}
+          req.user.save()
+          req.session.save()
+
 					return res.status(200).json({
 						ok: true,
-            message: 'User logged in successfully',
+            msg: 'User logged in successfully',
             token,
 					})
 				}
@@ -168,15 +222,24 @@ app.post('/user/login', async (req, res) => {
 		} else {
 			return res.status(400).json({
 				ok: false,
-				message: 'User not found',
+				msg: 'User not found',
 			})
 		}
 	} catch(err) {
 		return res.status(400).json({
 			ok: false,
-			message: 'Invalid password or email',
+			msg: 'Invalid password or email',
 		})
 	}
+})
+
+app.get('/user/logout', async (req, res) => {
+  req.session.destroy()
+  delete req.user
+  res.status(200).json({
+    ok: true,
+    msg: 'Logged out successfully',
+  })
 })
 
 app.post('/forgot-password', limiter({
@@ -212,7 +275,7 @@ app.post('/forgot-password', limiter({
     if (err) {
       return res.status(400).json({
         ok: false,
-        message: 'There was an error saving the recovery token, try again',
+        msg: 'There was an error saving the recovery token, try again',
       })
     }
     try {
@@ -260,11 +323,74 @@ app.get('/forgot-password/:token/:email', limiter({
   }
 })
 
+// Create a new game
+app.post('/game', protectRoute, limiter({
+  windowMs: 10 * 60 * 1000,
+  max: 10,
+  message: "You're making too many requests to this endpoint",
+}), async (req, res) => {
+  const error = msg => {
+    return res.status(400).json({
+      ok: false,
+      msg,
+    })
+  }
+  if (!req.body.email || req.body.email.length <= 0) {
+    return error('The email is missing')
+  }
+  if (!req.body.gameName || req.body.gameName.length <= 0) {
+    return error('You need to specify the game name')
+  }
+  if (!req.body.gameType || req.body.gameType.length <= 0) {
+    return error('You need to specify the game type')
+  }
+  if (!req.body.rounds || req.body.rounds.length <= 0) {
+    return error('You need to specify the rounds for that game')
+  }
+  if (!req.body.moveTimer || req.body.moveTime.length <= 0) {
+    return error('You need to specify the move timer')
+  }
+  if (req.body.gameName != 'Rounds' && req.body.gameName != 'All cards') {
+    return error('The round type is invalid')
+  }
+  // Users can only have 1 game per person
+  const existingGame = await Game.findOne({email: req.body.email})
+  if (existingGame) {
+    return error('You can only create one game per user')
+  } else {
+    const gameObject = {
+      gameName: req.body.gameName,
+      gameType: req.body.gameType,
+      rounds: req.body.rounds,
+      moveTimer: req.body.moveTimer,
+    }
+    console.log('Game object', gameObject)
+    let newGame = new Game(gameObject)
+    try {
+      await newUser.save()
+      return res.status(200).json({
+        ok: true,
+        msg: 'The game has been created successfully',
+      })
+    } catch (e) {
+      return error('Error creating the game try again')
+    }
+  }
+})
+
 app.listen(port, '0.0.0.0', (req, res) => {
 	console.log(`Listening on localhost:${port}`)
 })
 
 function protectRoute(req, res, next) {
-	if (req.user) next()
-	else res.status(401).json({error: 'You must be logged to access this page'})
+  console.log('--- Calling protected route... ---')
+	if (req.user) {
+    console.log('--- Access granted ---')
+    next()
+	} else {
+    res.status(401).json({
+      ok: false,
+      msg: 'You must be logged to do that action',
+    })
+  }
 }
