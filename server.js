@@ -30,7 +30,7 @@ const port = argv.port
 // This is to simplify everything but you should set it from the terminal
 // required to encrypt user accounts
 process.env.SALT = 'example-merlox120'
-mongoose.connect('mongodb://localhost:27017/authentication', {
+mongoose.connect('mongodb://localhost:27017/roshambo', {
 	useNewUrlParser: true,
 	useCreateIndex: true,
 })
@@ -338,11 +338,12 @@ app.post('/game', protectRoute, limiter({
     return error('The round type is invalid')
   }
   // Users can only have 1 game per person
-  const existingGame = await Game.findOne({email: req.body.email})
+  const existingGame = await Game.findOne({email: req.session.user.email})
   if (existingGame) {
     return error('You can only create one game per user')
   } else {
     const gameObject = {
+      email: req.session.user.email,
       gameName: req.body.gameName,
       gameType: req.body.gameType,
       rounds: req.body.rounds,
@@ -362,6 +363,15 @@ app.post('/game', protectRoute, limiter({
   }
 })
 
+app.get('/games', limiter({
+  windowMs: 10 * 60 * 1000,
+  max: 10,
+  message: "You're making too many requests to this endpoint",
+}), async (req, res) => {
+  const games = await Game.find({})
+  return res.status(200).json(games)
+})
+
 app.listen(port, '0.0.0.0', (req, res) => {
 	console.log(`Listening on localhost:${port}`)
 })
@@ -369,7 +379,7 @@ app.listen(port, '0.0.0.0', (req, res) => {
 function protectRoute(req, res, next) {
   console.log('--- Calling protected route... ---')
 	if (req.session.user) {
-    console.log('--- Access granted ---')
+    console.log('--- Access granted --- to', req.session.user.email)
     next()
 	} else {
     res.status(401).json({
