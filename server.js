@@ -94,17 +94,11 @@ app.post('/user', async (req, res) => {
 				// Create the JWT token based on that new user
 				const token = jwt.sign({userId: newUser.id}, process.env.SALT)
 
-        req.user = {
-  				email: req.body.email,
-          username: req.body.username,
-          token,
-  			}
         req.session.user = {
   				email: req.body.email,
           username: req.body.username,
           token,
   			}
-        req.user.save()
         req.session.save()
 
 				// If the user was added successful, return the user credentials
@@ -199,17 +193,11 @@ app.post('/user/login', async (req, res) => {
 				} else {
 					const token = jwt.sign({userId: foundUser._id}, process.env.SALT)
 
-          req.user = {
-    				email: req.body.email,
-            username: foundUser.username,
-            token,
-    			}
           req.session.user = {
     				email: req.body.email,
             username: foundUser.username,
             token,
     			}
-          req.user.save()
           req.session.save()
 
 					return res.status(200).json({
@@ -235,7 +223,6 @@ app.post('/user/login', async (req, res) => {
 
 app.get('/user/logout', async (req, res) => {
   req.session.destroy()
-  delete req.user
   res.status(200).json({
     ok: true,
     msg: 'Logged out successfully',
@@ -335,9 +322,6 @@ app.post('/game', protectRoute, limiter({
       msg,
     })
   }
-  if (!req.body.email || req.body.email.length <= 0) {
-    return error('The email is missing')
-  }
   if (!req.body.gameName || req.body.gameName.length <= 0) {
     return error('You need to specify the game name')
   }
@@ -347,10 +331,10 @@ app.post('/game', protectRoute, limiter({
   if (!req.body.rounds || req.body.rounds.length <= 0) {
     return error('You need to specify the rounds for that game')
   }
-  if (!req.body.moveTimer || req.body.moveTime.length <= 0) {
+  if (!req.body.moveTimer || req.body.moveTimer.length <= 0) {
     return error('You need to specify the move timer')
   }
-  if (req.body.gameName != 'Rounds' && req.body.gameName != 'All cards') {
+  if (req.body.gameType != 'Rounds' && req.body.gameType != 'All cards') {
     return error('The round type is invalid')
   }
   // Users can only have 1 game per person
@@ -364,15 +348,15 @@ app.post('/game', protectRoute, limiter({
       rounds: req.body.rounds,
       moveTimer: req.body.moveTimer,
     }
-    console.log('Game object', gameObject)
     let newGame = new Game(gameObject)
     try {
-      await newUser.save()
+      await newGame.save()
       return res.status(200).json({
         ok: true,
         msg: 'The game has been created successfully',
       })
     } catch (e) {
+      console.log('Error creating the game', e)
       return error('Error creating the game try again')
     }
   }
@@ -384,7 +368,7 @@ app.listen(port, '0.0.0.0', (req, res) => {
 
 function protectRoute(req, res, next) {
   console.log('--- Calling protected route... ---')
-	if (req.user) {
+	if (req.session.user) {
     console.log('--- Access granted ---')
     next()
 	} else {
