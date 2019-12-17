@@ -261,7 +261,10 @@ app.post('/user/login-with-crypto', async (req, res) => {
       })
       try {
         await newUser.save()
-      } catch (e) { return error("Error saving your new account") }
+      } catch (e) {
+        console.log("Error saving new mnemonic user", e)
+        return error("Error saving your new account")
+      }
       const userId = newUser._id;
       req.session.user = { userId }
       req.session.save()
@@ -271,7 +274,8 @@ app.post('/user/login-with-crypto', async (req, res) => {
         userId,
       })
 		}
-	} catch(err) {
+	} catch (e) {
+    console.log("Error processing the request", e)
     return error("Error processing the request on the server")
 	}
 })
