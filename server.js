@@ -16,6 +16,9 @@ const sendEmail = require('./src/sendEmail')
 const mongoose = require('mongoose')
 const session = require('express-session')
 const MongoStore = require('connect-mongo')(session)
+const bip39 = require("bip39")
+const hdkey = require('ethereumjs-wallet/hdkey')
+
 const argv = yargs.option('port', {
     alias: 'p',
     description: 'Set the port to run this server on',
@@ -26,6 +29,9 @@ if(!argv.port) {
     process.exit(0)
 }
 const port = argv.port
+
+let infura = 'wss://mainnet.infura.io/ws/v3/a6500f69774d4a309c53fea4d8959d81'
+let contractAddress = ''
 
 // This is to simplify everything but you should set it from the terminal
 // required to encrypt user accounts
@@ -91,13 +97,11 @@ app.post('/user', async (req, res) => {
 						msg: 'There was an error saving the new user, try again',
 					})
 				}
-				// Create the JWT token based on that new user
-				const token = jwt.sign({userId: newUser.id}, process.env.SALT)
-
+        const userId = newUser._id;
         req.session.user = {
   				email: req.body.email,
           username: req.body.username,
-          token,
+          userId,
   			}
         req.session.save()
 
@@ -105,7 +109,7 @@ app.post('/user', async (req, res) => {
 				return res.status(200).json({
 					ok: true,
           msg: 'User created successfully',
-					token,
+					userId,
 				})
 			})
 		}
@@ -191,19 +195,18 @@ app.post('/user/login', async (req, res) => {
 						msg: 'User found but the password is invalid',
 					})
 				} else {
-					const token = jwt.sign({userId: foundUser._id}, process.env.SALT)
-
+          const userId = foundUser._id;
           req.session.user = {
     				email: req.body.email,
             username: foundUser.username,
-            token,
+            userId,
     			}
           req.session.save()
 
 					return res.status(200).json({
 						ok: true,
             msg: 'User logged in successfully',
-            token,
+            userId,
 					})
 				}
 			})
@@ -218,6 +221,58 @@ app.post('/user/login', async (req, res) => {
 			ok: false,
 			msg: 'Invalid password or email',
 		})
+	}
+})
+
+// Login or register with crypto if no account is found after a valid mnemonic
+// Checks if a user with mnemonic exists
+// If not, it creates a new one and returns the user id in both cases
+// We can't encrypt the mnemonic because users won't be able to login without it
+app.post('/user/login-with-crypto', async (req, res) => {
+  const error = msg => {
+    return res.status(400).json({
+      ok: false,
+      msg,
+    })
+  }
+	try {
+    if (!req.body.mnemonic || req.body.mnemonic.length == 0) {
+      return error("Mnemonic not received")
+    }
+    if (req.body.mnemonic.split(' ').length != 12) {
+      return error("The mnemonic received must be 12 words")
+    }
+    req.body.mnemonic = req.body.mnemonic.trim()
+		let foundUser = await User.findOne({mnemonic: req.body.mnemonic})
+		if (foundUser) {
+      // Log in for that found user
+      const userId = foundUser._id;
+      req.session.user = { userId }
+      req.session.save()
+			return res.status(200).json({
+				ok: true,
+        msg: 'User logged in successfully',
+        userId,
+			})
+		} else {
+      // Create a new user based on that mnemonic
+      let newUser = new User({
+        mnemonic: req.body.mnemonic,
+      })
+      try {
+        await newUser.save()
+      } catch (e) { return error("Error saving your new account") }
+      const userId = newUser._id;
+      req.session.user = { userId }
+      req.session.save()
+      return res.status(200).json({
+        ok: true,
+        msg: 'User created successfully',
+        userId,
+      })
+		}
+	} catch(err) {
+    return error("Error processing the request on the server")
 	}
 })
 
@@ -338,12 +393,12 @@ app.post('/game', protectRoute, limiter({
     return error('The round type is invalid')
   }
   // Users can only have 1 game per person
-  const existingGame = await Game.findOne({email: req.session.user.email})
+  const existingGame = await Game.findOne({userId: req.session.user.userId})
   if (existingGame) {
     return error('You can only create one game per user')
   } else {
     const gameObject = {
-      email: req.session.user.email,
+      userId: req.session.user.userId,
       gameName: req.body.gameName,
       gameType: req.body.gameType,
       rounds: req.body.rounds,
@@ -363,6 +418,7 @@ app.post('/game', protectRoute, limiter({
   }
 })
 
+// Get all the games
 app.get('/games', limiter({
   windowMs: 10 * 60 * 1000,
   max: 10,
@@ -372,6 +428,16 @@ app.get('/games', limiter({
   return res.status(200).json(games)
 })
 
+// To get your blockchain address from your logged-in account to display in the
+// user interface when logged in
+app.get('/address', protectRoute, limiter({
+  windowMs: 10 * 60 * 1000,
+  max: 10,
+  message: "You're making too many requests to this endpoint",
+}), async (req, res) => {
+  // TODO
+})
+
 app.listen(port, '0.0.0.0', (req, res) => {
 	console.log(`Listening on localhost:${port}`)
 })
@@ -379,7 +445,7 @@ app.listen(port, '0.0.0.0', (req, res) => {
 function protectRoute(req, res, next) {
   console.log('--- Calling protected route... ---')
 	if (req.session.user) {
-    console.log('--- Access granted --- to', req.session.user.email)
+    console.log('--- Access granted --- to', req.session.user.userId)
     next()
 	} else {
     res.status(401).json({
@@ -387,4 +453,18 @@ function protectRoute(req, res, next) {
       msg: 'You must be logged to do that action',
     })
   }
+}
+
+// To generate the private key and address needed to sign transactions
+function generateAddressesFromSeed(seed) {
+	return new Promise(async resolve => {
+    let hdwallet = hdkey.fromMasterSeed(await bip39.mnemonicToSeed(seed))
+    let wallet_hdpath = "m/44'/60'/0'/0/0" // Change the last number to get other accounts like /0 or /1 or /2
+    let wallet = hdwallet.derivePath(wallet_hdpath).getWallet()
+    let address = '0x' + wallet.getAddress().toString("hex")
+    let myPrivateKey = wallet.getPrivateKey().toString("hex")
+    // privateKey = '0x' + myPrivateKey
+    console.log('Your address is', address)
+		resolve(address)
+	})
 }
