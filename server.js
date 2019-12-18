@@ -16,8 +16,17 @@ const sendEmail = require('./src/sendEmail')
 const mongoose = require('mongoose')
 const session = require('express-session')
 const MongoStore = require('connect-mongo')(session)
-const bip39 = require("bip39")
-const hdkey = require('ethereumjs-wallet/hdkey')
+const bip39 = require('bip39')
+const TronAddress = require('@bitsler/tron-address')
+const TronGrid = require('trongrid')
+const TronWeb = require('tronweb')
+
+// TODO Change the fullhost to mainnet: https://api.trongrid.io
+// Instead of testnet: https://api.shasta.trongrid.io
+const tronWeb = new TronWeb({
+  fullHost: 'https://api.shasta.trongrid.io',
+})
+const tronGrid = new TronGrid(tronWeb)
 
 const argv = yargs.option('port', {
     alias: 'p',
@@ -29,9 +38,6 @@ if(!argv.port) {
     process.exit(0)
 }
 const port = argv.port
-
-let infura = 'wss://mainnet.infura.io/ws/v3/a6500f69774d4a309c53fea4d8959d81'
-let contractAddress = ''
 
 // This is to simplify everything but you should set it from the terminal
 // required to encrypt user accounts
@@ -67,50 +73,57 @@ app.use('*', (req, res, next) => {
 	next()
 })
 
+const err = (res, msg) => {
+  return res.status(400).json({
+    ok: false,
+    msg,
+  })
+}
+
 // To register a new user
 app.post('/user', async (req, res) => {
 	try {
 		let foundUser = await User.findOne({email: req.body.email})
 		// If we found a user, return a message indicating that the user already exists
 		if(foundUser) {
-			return res.status(400).json({
-				ok: false,
-				msg: 'The user already exists, login or try again',
-			})
+      return err('The user already exists, login or try again')
 		} else {
       if (req.body.password.length < 6) {
-        return res.status(400).json({
-  				ok: false,
-  				msg: 'The password must be at least 6 characters',
-  			})
+        return err('The password must be at least 6 characters')
       }
+      const mnemonic = bip39.generateMnemonic()
 			let newUser = new User({
 				email: req.body.email,
 				password: req.body.password,
         username: req.body.username,
+        mnemonic,
 			})
 
-			newUser.save(err => {
-				if(err) {
-					return res.status(400).json({
-						ok: false,
-						msg: 'There was an error saving the new user, try again',
-					})
-				}
-        const userId = newUser._id;
-        req.session.user = {
-  				email: req.body.email,
-          username: req.body.username,
-          userId,
-  			}
-        req.session.save()
+      try {
+			  await newUser.save()
+      } catch (e) {
+        console.log('Error saving the new user', e)
+        return err('Error saving the new user')
+      }
+      const userId = newUser._id;
+      const userAddress = new TronAddress(foundUser.mnemonic, 0)
+      const balance = (await tronGrid.account.get(userAddress)).data[0].balance
+      req.session.user = {
+				email: req.body.email,
+        username: req.body.username,
+        userId,
+        userAddress,
+        balance,
+			}
+      req.session.save()
 
-				// If the user was added successful, return the user credentials
-				return res.status(200).json({
-					ok: true,
-          msg: 'User created successfully',
-					userId,
-				})
+			// If the user was added successful, return the user credentials
+			return res.status(200).json({
+				ok: true,
+        msg: 'User created successfully',
+				userId,
+        userAddress,
+        balance,
 			})
 		}
 	} catch(err) {
@@ -188,7 +201,7 @@ app.post('/user/login', async (req, res) => {
 	try {
 		let foundUser = await User.findOne({email: req.body.email})
 		if(foundUser) {
-			foundUser.comparePassword(req.body.password, (isMatch) => {
+			foundUser.comparePassword(req.body.password, async isMatch => {
 				if(!isMatch) {
 					return res.status(400).json({
 						ok: false,
@@ -196,10 +209,15 @@ app.post('/user/login', async (req, res) => {
 					})
 				} else {
           const userId = foundUser._id;
+          const userAddress = new TronAddress(foundUser.mnemonic, 0)
+          let balance = (await tronGrid.account.get(userAddress)).data[0].balance
+
           req.session.user = {
     				email: req.body.email,
             username: foundUser.username,
             userId,
+            userAddress,
+            balance,
     			}
           req.session.save()
 
@@ -207,6 +225,8 @@ app.post('/user/login', async (req, res) => {
 						ok: true,
             msg: 'User logged in successfully',
             userId,
+            userAddress,
+            balance,
 					})
 				}
 			})
@@ -244,18 +264,14 @@ app.post('/user/login-with-crypto', async (req, res) => {
     }
     req.body.mnemonic = req.body.mnemonic.trim()
 		let foundUser = await User.findOne({mnemonic: req.body.mnemonic})
+    let userId
+
+    // Existing account, login
 		if (foundUser) {
       // Log in for that found user
-      const userId = foundUser._id;
-      req.session.user = { userId }
-      req.session.save()
-			return res.status(200).json({
-				ok: true,
-        msg: 'User logged in successfully',
-        userId,
-			})
+      userId = foundUser._id;
 		} else {
-      // Create a new user based on that mnemonic
+      // New account, register
       let newUser = new User({
         mnemonic: req.body.mnemonic,
       })
@@ -265,15 +281,27 @@ app.post('/user/login-with-crypto', async (req, res) => {
         console.log("Error saving new mnemonic user", e)
         return error("Error saving your new account")
       }
-      const userId = newUser._id;
-      req.session.user = { userId }
-      req.session.save()
-      return res.status(200).json({
-        ok: true,
-        msg: 'User created successfully',
-        userId,
-      })
+      userId = newUser._id;
 		}
+
+    const userAddress = (new TronAddress(req.body.mnemonic, 0)).master
+    console.log('User address', userAddress)
+    const balance = (await tronGrid.account.get(userAddress)).data[0].balance
+    console.log('Balance', balance)
+
+    req.session.user = {
+      userId,
+      userAddress,
+      balance,
+    }
+    req.session.save()
+    return res.status(200).json({
+      ok: true,
+      msg: 'User logged in successfully',
+      userId,
+      userAddress,
+      balance,
+    })
 	} catch (e) {
     console.log("Error processing the request", e)
     return error("Error processing the request on the server")
@@ -432,16 +460,6 @@ app.get('/games', limiter({
   return res.status(200).json(games)
 })
 
-// To get your blockchain address from your logged-in account to display in the
-// user interface when logged in
-app.get('/address', protectRoute, limiter({
-  windowMs: 10 * 60 * 1000,
-  max: 10,
-  message: "You're making too many requests to this endpoint",
-}), async (req, res) => {
-  // TODO
-})
-
 app.listen(port, '0.0.0.0', (req, res) => {
 	console.log(`Listening on localhost:${port}`)
 })
@@ -459,16 +477,14 @@ function protectRoute(req, res, next) {
   }
 }
 
-// To generate the private key and address needed to sign transactions
-function generateAddressesFromSeed(seed) {
-	return new Promise(async resolve => {
-    let hdwallet = hdkey.fromMasterSeed(await bip39.mnemonicToSeed(seed))
-    let wallet_hdpath = "m/44'/60'/0'/0/0" // Change the last number to get other accounts like /0 or /1 or /2
-    let wallet = hdwallet.derivePath(wallet_hdpath).getWallet()
-    let address = '0x' + wallet.getAddress().toString("hex")
-    let myPrivateKey = wallet.getPrivateKey().toString("hex")
-    // privateKey = '0x' + myPrivateKey
-    console.log('Your address is', address)
-		resolve(address)
-	})
-}
+// function generateAddressesFromSeed(seed) {
+// 	return new Promise(async resolve => {
+//     let hdwallet = hdkey.fromMasterSeed(await bip39.mnemonicToSeed(seed))
+//     let wallet_hdpath = "m/44'/60'/0'/0/0" // Change the last number to get other accounts like /0 or /1 or /2
+//     let wallet = hdwallet.derivePath(wallet_hdpath).getWallet()
+//     let address = '0x' + wallet.getAddress().toString("hex")
+//     // let myPrivateKey = wallet.getPrivateKey().toString("hex")
+//     // privateKey = '0x' + myPrivateKey
+// 		resolve(address)
+// 	})
+// }
