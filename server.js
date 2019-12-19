@@ -451,11 +451,7 @@ app.post('/game', protectRoute, limiter({
 })
 
 // Get all the games
-app.get('/games', limiter({
-  windowMs: 10 * 60 * 1000,
-  max: 10,
-  message: "You're making too many requests to this endpoint",
-}), async (req, res) => {
+app.get('/games', async (req, res) => {
   try {
     const games = await Game.find({})
     return res.status(200).json(games)
@@ -495,7 +491,7 @@ function protectRoute(req, res, next) {
     console.log('--- Access granted --- to', req.session.user.userId)
     next()
 	} else {
-    res.status(401).json({
+    return res.status(401).json({
       ok: false,
       msg: 'You must be logged to do that action',
     })
