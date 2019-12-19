@@ -456,8 +456,33 @@ app.get('/games', limiter({
   max: 10,
   message: "You're making too many requests to this endpoint",
 }), async (req, res) => {
-  const games = await Game.find({})
-  return res.status(200).json(games)
+  try {
+    const games = await Game.find({})
+    return res.status(200).json(games)
+  } catch (e) {
+    return err('Error processing the request on the server')
+  }
+})
+
+app.delete('/games/:userId', protectRoute, limiter({
+  windowMs: 10 * 60 * 1000,
+  max: 10,
+  message: "You're making too many requests to this endpoint",
+}), async (req, res) => {
+  if (!req.params.userId || req.params.userId.length == 0) {
+    return err('The user id is missing make sure you are logged in')
+  }
+  try {
+    // Returns NULL if not found or deleted already otherwise it returns the item
+    // in either case we don't case so we return the same success message
+    await Game.findOneAndRemove({userId: req.params.userId})
+    return res.status(200).json({
+      ok: true,
+      msg: 'The game has been deleted successfully',
+    })
+  } catch (e) {
+    return err('Error processing the request on the server')
+  }
 })
 
 app.listen(port, '0.0.0.0', (req, res) => {
