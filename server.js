@@ -307,20 +307,20 @@ io.on('connection', socket => {
       return issue('Error saving the new user')
     }
     const userId = newUser._id;
-    const userAddress = new TronAddress(mnemonic, 0)
+    const userAddress = (new TronAddress(mnemonic, 0)).master
     socket['user'] = {
       userId,
       userAddress,
       balance: 0,
     }
-    console.log('HEEEEEEY')
+    const response = {
+      msg: "User registered successfully",
+      userId,
+      userAddress,
+      balance: 0,
+    }
     return socket.emit('setup:login-complete', {
-      response: {
-        msg: "User registered successfully",
-        userId,
-        userAddress,
-        balance: 0,
-      },
+      response,
     })
   })
 })
