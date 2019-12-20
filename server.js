@@ -146,10 +146,9 @@ io.on('connection', socket => {
       msg: 'The game has been created successfully',
     })
   })
-  socket.on('game:get-games', () => {
-    socket.emit('game:get-games', {
-      msg: socketGames,
-    })
+  socket.on('game:get-games', (callback) => {
+    callback(socketGames)
+    // callback(JSON.stringify(socketGames))
   })
   socket.on('game:join', async data => {
     // Setup the user id on my game
@@ -220,7 +219,7 @@ io.on('connection', socket => {
           console.log("Error saving new mnemonic user", e)
           return issue("Error saving your new account")
         }
-        userId = newUser._id;
+        userId = socket.id;
         responseMsg = "New user created successfully"
       }
       const userAddress = (new TronAddress(data.mnemonic, 0)).master
@@ -268,7 +267,7 @@ io.on('connection', socket => {
       if (!isMatch) {
         return issue('User found but the password is invalid')
       }
-      const userId = foundUser._id;
+      const userId = socket.id;
       const userAddress = (new TronAddress(foundUser.mnemonic, 0)).master
       console.log('User address', userAddress)
       const balance = await tronWeb.trx.getBalance(userAddress)
@@ -316,7 +315,7 @@ io.on('connection', socket => {
       username: data.username,
       mnemonic,
     })
-    const userId = newUser._id;
+    const userId = socket.id;
 
     try {
       await newUser.save()
