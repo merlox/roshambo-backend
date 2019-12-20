@@ -1,6 +1,7 @@
 const mongoose = require('mongoose')
 const bcrypt = require('bcrypt')
 
+// The hidden _id is the userId
 const userSchema = new mongoose.Schema({
   email: String,
   password: String,

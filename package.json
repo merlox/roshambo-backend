@@ -27,6 +27,7 @@
     "mongoose": "^5.6.7",
     "nodemailer": "^6.3.1",
     "request": "^2.88.0",
+    "socket.io": "^2.3.0",
     "trongrid": "^1.2.4",
     "tronweb": "^2.8.1",
     "yargs": "^14.0.0"
