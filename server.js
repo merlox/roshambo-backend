@@ -49,6 +49,10 @@ let socketGames = [] // Each game contains the game object including the socketI
 // This is to simplify everything but you should set it from the terminal
 // required to encrypt user accounts
 process.env.SALT = 'example-merlox120'
+mongoose.set('useNewUrlParser', true)
+mongoose.set('useFindAndModify', false)
+mongoose.set('useCreateIndex', true)
+mongoose.set('useUnifiedTopology', true)
 mongoose.connect('mongodb://localhost:27017/roshambo', {
 	useNewUrlParser: true,
 	useCreateIndex: true,
