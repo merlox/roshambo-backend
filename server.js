@@ -26,7 +26,9 @@ const io = require('socket.io')(http)
 // TODO Change the fullhost to mainnet: https://api.trongrid.io
 // Instead of testnet: https://api.shasta.trongrid.io
 const tronWeb = new TronWeb({
-  fullHost: 'https://api.shasta.trongrid.io',
+  fullNode: 'https://api.shasta.trongrid.io',
+  solidityNode: 'https://api.shasta.trongrid.io',
+  eventServer: 'https://api.shasta.trongrid.io',
 })
 const tronGrid = new TronGrid(tronWeb)
 
@@ -243,6 +245,12 @@ io.on('connection', socket => {
     const issue = msg => {
       return socket.emit('issue', { msg })
     }
+    if (!data.email || data.email.length == 0) {
+      return issue("The email is missing")
+    }
+    if (!data.password || data.password.length == 0) {
+      return issue("The password is missing")
+    }
     let foundUser
     try {
       foundUser = await User.findOne({email: data.email})
@@ -255,24 +263,25 @@ io.on('connection', socket => {
     foundUser.comparePassword(data.password, async isMatch => {
       if (!isMatch) {
         return issue('User found but the password is invalid')
-      } else {
-        const userId = foundUser._id;
-        const userAddress = new TronAddress(foundUser.mnemonic, 0)
-        let balance = (await tronGrid.account.get(userAddress)).data[0].balance
-
-        socket['user'] = {
+      }
+      const userId = foundUser._id;
+      const userAddress = (new TronAddress(foundUser.mnemonic, 0)).master
+      console.log('User address', userAddress)
+      const balance = await tronWeb.trx.getBalance(userAddress)
+      console.log('Balance', balance)
+      socket['user'] = {
+        userId,
+        userAddress,
+        balance,
+      }
+      return socket.emit('setup:login-complete', {
+        response: {
+          msg: 'User logged in successfully',
           userId,
           userAddress,
           balance,
-        }
-        return socket.emit('setup:login-complete', {
-          msg: {
-            userId,
-            userAddress,
-            balance,
-          }
-        })
-      }
+        },
+      })
     })
   })
   socket.on('setup:register', async data => {
@@ -293,21 +302,24 @@ io.on('connection', socket => {
     if (data.password.length < 6) {
       return issue('The password must be at least 6 characters')
     }
-    const mnemonic = bip39.generateMnemonic()
+    const mnemonic = TronAddress.generateMnemonic()
+    const userAddress = (new TronAddress(mnemonic, 0)).master
+    const a = await tronWeb.trx.getBalance(userAddress)
+
     let newUser = new User({
       email: data.email,
       password: data.password,
       username: data.username,
       mnemonic,
     })
+    const userId = newUser._id;
+
     try {
       await newUser.save()
     } catch (e) {
       console.log('Error saving the new user', e)
       return issue('Error saving the new user')
     }
-    const userId = newUser._id;
-    const userAddress = (new TronAddress(mnemonic, 0)).master
     socket['user'] = {
       userId,
       userAddress,
@@ -319,6 +331,7 @@ io.on('connection', socket => {
       userAddress,
       balance: 0,
     }
+    console.log('Response', response)
     return socket.emit('setup:login-complete', {
       response,
     })
