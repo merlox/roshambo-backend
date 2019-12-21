@@ -77,7 +77,9 @@ app.use(bodyParser.json())
 app.use(bodyParser.urlencoded({extended: true}))
 
 let socketIds = []
-let socketGames = [] // Each game contains the game object
+// Games shown on the matchmaking scene
+let socketGames = []
+// Active games played by people in a room
 let gameRooms = []
 io.on('connection', socket => {
   console.log('User connected', socket.id)
@@ -210,6 +212,7 @@ io.on('connection', socket => {
       return issue("Error processing the join request")
     }
     const roomId = "room" + gameRooms.length
+
     const room = {
       roomId,
       playerOne: data.playerOne,
@@ -218,6 +221,11 @@ io.on('connection', socket => {
       gameType: data.gameType,
       rounds: data.rounds,
       moveTimer: data.moveTimer,
+      currentRound: 1,
+      playerOneActive: null,
+      playerTwoActive: null,
+      starsPlayerOne: 3,
+      starsPlayerTwo: 3,
     }
     gameRooms.push(room)
     socket.join(roomId)
@@ -249,14 +257,11 @@ io.on('connection', socket => {
     if (!game) {
       return issue('Game not found')
     }
-    game.currentRound++
-
     const send = endpoint => {
       const isPlayerOne = socket.id == game.playerOne
       socket.emit(endpoint)
       return io.to(isPlayerOne ? game.playerTwo : game.playerOne).emit(endpoint)
     }
-
     if (socket.id == game.playerOne) {
       game.playerOneActive = data.cardType
     } else {
@@ -267,6 +272,7 @@ io.on('connection', socket => {
 
     // If both cards are placed, calculate result
     if (game.playerOneActive && game.playerTwoActive) {
+      game.currentRound++
       const winner = calculateWinner(game.playerOneActive, game.playerTwoActive)
 
       if (!winner) {
@@ -366,12 +372,13 @@ io.on('connection', socket => {
   // DONE 2. Player 2 places a card, nothing happens until the other is placed
   // DONE 3. Both players place their cards: draw
   // DONE 4. Both players place their cards: winner one
-  // 5. Both players place their cards: winner two
-  // Check that the stars are being updated
+  // DONE 5. Both players place their cards: winner two
+  // DONE Check that the stars are being updated
   // Check the game finishing functionality after the rounds are over
   // Game finishing when stars are over
   // Game finishing when timeout is reached
-  // Crear una AI que simule movimientos randoms
+  // Make sure the second player sees the cards on the other side
+  // Animate card movements when both have placed
 
   socket.on('setup:login-with-crypto', async data => {
     const issue = msg => {
