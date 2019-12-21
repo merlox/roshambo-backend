@@ -78,6 +78,7 @@ app.use(session({
 app.use(bodyParser.json())
 app.use(bodyParser.urlencoded({extended: true}))
 
+let gameRooms = []
 io.on('connection', socket => {
   console.log('User connected', socket.id)
   socketIds.push(socket.id)
@@ -95,7 +96,11 @@ io.on('connection', socket => {
       socketGames.splice(gameExistingIndex, 1)
     }
     try {
-      await Game.findOneAndRemove({playerOne: socket.id})
+      const game = await Game.findOne({playerOne: socket.id})
+      // Only delete non started games
+      if (game && !game.status == 'CREATED') {
+        await game.deleteOne()
+      }
     } catch (e) {
       console.log('Error', e)
       console.log('Error deleting socket games from the database:', socket.id)
@@ -142,36 +147,71 @@ io.on('connection', socket => {
       return issue("Error creating the new game")
     }
     socketGames.push(gameObject)
-    socket.emit('game:create-complete', {
+    io.emit('game:create-complete', {
       msg: 'The game has been created successfully',
     })
   })
   socket.on('game:get-games', (callback) => {
     callback(socketGames)
-    // callback(JSON.stringify(socketGames))
   })
   socket.on('game:join', async data => {
+    const issue = msg => {
+      console.log('Called issue', msg)
+      return socket.emit('issue', { msg })
+    }
+
     // Setup the user id on my game
     let game
+    if (!data.playerOne || data.playerOne.length == 0) {
+      return issue('The player one data is missing')
+    }
+    if (!data.playerTwo || data.playerTwo.length == 0) {
+      return issue('The player two data is missing')
+    }
+    if (!data.gameName || data.gameName.length == 0) {
+      return issue('The game name is missing')
+    }
+    if (!data.gameType || data.gameType.length == 0) {
+      return issue('The game type is missing')
+    }
+    if (!data.rounds || data.rounds.length == 0) {
+      return issue('The game rounds is missing')
+    }
+    if (!data.moveTimer || data.moveTimer.length == 0) {
+      return issue('The game move timer is missing')
+    }
+
     try {
-      game = await Game.findOne({userId: data.userId})
+      game = await Game.findOne({playerOne: data.playerOne})
+      game.playerTwo = data.playerTwo
+      game.gameName = data.gameName
+      game.gameType = data.gameType
+      game.rounds = data.rounds
+      game.moveTimer = data.moveTimer
+      game.status = 'STARTED'
       if (!game) {
-        return socket.emit('issue', {
-          msg: "That game couldn't be found",
-        })
+        return issue("Couldn't find the game you're looking for")
       }
-      game.enemyUserId = req.session.user.userId
       await game.save()
     } catch (e) {
-      return socket.emit('issue', {
-        msg: "Error processing the join request",
-      })
+      return issue("Error processing the join request")
     }
-    // Emit event to inform the other user
-    io.emit('game:join-complete', {
-      playerOne: data.userId,
-      playerTwo: req.session.user.userId,
-    })
+    const roomId = "room" + gameRooms.length
+    const room = {
+      roomId,
+      playerOne: data.playerOne,
+      playerTwo: data.playerTwo,
+      gameName: data.gameName,
+      gameType: data.gameType,
+      rounds: data.rounds,
+      moveTimer: data.moveTimer,
+    }
+    gameRooms.push(room)
+    socket.join(roomId)
+
+    // Emit event to inform the users
+    socket.emit('game:join-complete', room)
+    io.to(data.playerOne).emit('game:join-complete', room)
   })
   socket.on('game:delete', async () => {
     const gameExistingIndex = socketGames.map(game => game.playerOne).indexOf(socket.id)
@@ -206,7 +246,7 @@ io.on('connection', socket => {
       // Existing account, login
       if (foundUser) {
         // Log in for that found user
-        userId = foundUser._id;
+        userId = socket.id;
         responseMsg = "User logged in successfully"
       } else {
         // New account, register

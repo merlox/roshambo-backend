@@ -6,11 +6,12 @@ const gameSchema = new mongoose.Schema({
     playerTwo: String,
     gameName: String,
     gameType: String,
-    rounds: Number,
-    moveTimer: Number,
-    isComplete: {
-      type: Boolean,
-      default: false,
+    rounds: String,
+    moveTimer: String,
+    status: {
+      type: String,
+      enum: ['CREATED', 'STARTED', 'COMPLETED'],
+      default: 'CREATED',
     },
     winner: String, // UserId winner
 }, {
