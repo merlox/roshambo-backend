@@ -130,12 +130,18 @@ io.on('connection', socket => {
       return issue('The round type is invalid')
     }
     const gameObject = {
+      roomId: null,
       playerOne: socket.id,
       playerTwo: null,
       gameName: data.gameName,
       gameType: data.gameType,
       rounds: data.rounds,
       moveTimer: data.moveTimer,
+      currentRound: 1,
+      playerOneActive: null,
+      playerTwoActive: null,
+      starsPlayerOne: 3,
+      starsPlayerTwo: 3,
     }
 
     const gameExisting = socketGames.map(game => game.playerOne).find(playerOne => playerOne == socket.id)
@@ -155,8 +161,10 @@ io.on('connection', socket => {
       msg: 'The game has been created successfully',
     })
   })
-  socket.on('game:get-games', (callback) => {
-    callback(socketGames)
+  socket.on('game:get-games', () => {
+    socket.emit('game:get-games', {
+      data: socketGames,
+    })
   })
   socket.on('game:join', async data => {
     const issue = msg => {
@@ -233,17 +241,23 @@ io.on('connection', socket => {
     }
   })
   socket.on('game:card-placed', async data => {
+    console.log('Card placed called')
     const issue = msg => {
       return socket.emit('issue', { msg })
     }
-    console.log('Card placed called')
     const game = gameRooms.find(room => room.roomId == data.roomId)
     if (!game) {
       return issue('Game not found')
     }
     game.currentRound++
 
-    if (data.player == 'one') {
+    const send = endpoint => {
+      const isPlayerOne = socket.id == game.playerOne
+      socket.emit(endpoint)
+      return io.to(isPlayerOne ? game.playerTwo : game.playerOne).emit(endpoint)
+    }
+
+    if (socket.id == game.playerOne) {
       game.playerOneActive = data.cardType
     } else {
       game.playerTwoActive = data.cardType
@@ -254,12 +268,12 @@ io.on('connection', socket => {
     // If both cards are placed, calculate result
     if (game.playerOneActive && game.playerTwoActive) {
       const winner = calculateWinner(game.playerOneActive, game.playerTwoActive)
-      console.log("Winner ? ", winner)
+
       if (!winner) {
-        console.log('No winner deteceted, emitting round draw')
+        console.log('No winner detected, emitting round draw')
         game.playerOneActive = null
         game.playerTwoActive = null
-        return socket.to(game.roomId).emit('game:round:draw')
+        return send('game:round:draw')
       }
 
       if (winner == 'one') {
@@ -269,25 +283,38 @@ io.on('connection', socket => {
         console.log("After star change: ", game)
         // If stars 0 for any player, emit victory
         if (game.starsPlayerOne == 0) {
-          console.log("Player 2 wins for stars")
-          return socket.to(game.roomId).emit('game:finish:winner-player-two')
+          console.log("GAME OVER Player 2 wins for stars")
+          return send('game:finish:winner-player-two')
         }
         if (game.starsPlayerTwo == 0) {
-          console.log("Player 1 wins for stars")
-          return socket.to(game.roomId).emit('game:finish:winner-player-one')
+          console.log("GAME OVER Player 1 wins for stars")
+          return send('game:finish:winner-player-one')
         }
         // If the rounds are over, emit the winner
         if (game.currentRound >= game.rounds) {
+          console.log("All rounds over, emiting winner:")
           if (game.starsPlayerOne > game.starsPlayerTwo) {
-            return socket.to(game.roomId).emit('game:finish:winner-player-one')
+            console.log("GAME OVER Winner player one")
+            return send('game:finish:winner-player-one')
           } else if (game.starsPlayerOne < game.starsPlayerTwo) {
-            return socket.to(game.roomId).emit('game:finish:winner-player-two')
+            console.log("GAME OVER Winner player two")
+            return send('game:finish:winner-player-two')
           } else {
-            return socket.to(game.roomId).emit('game:finish:draw')
+            console.log("GAME OVER DRAW")
+            return send('game:finish:draw')
           }
         }
+        console.log("Emiting winner one round...")
+        game.playerOneActive = null
+        game.playerTwoActive = null
+
         // Else complete this round
-        return socket.to(game.roomId).emit('game:round:winner-one', {
+        socket.emit('game:round:winner-one', {
+          starsPlayerOne: game.starsPlayerOne,
+          starsPlayerTwo: game.starsPlayerTwo,
+        })
+        return io.to(socket.id == game.playerOne ? game.playerTwo : game.playerOne)
+          .emit('game:round:winner-one', {
           starsPlayerOne: game.starsPlayerOne,
           starsPlayerTwo: game.starsPlayerTwo,
         })
@@ -299,29 +326,37 @@ io.on('connection', socket => {
         game.starsPlayerTwo++
         // If stars 0 for any player, emit victory
         if (game.starsPlayerOne == 0) {
-          return socket.to(game.roomId).emit('game:finish:winner-player-two')
+          return send('game:finish:winner-player-two')
         }
         if (game.starsPlayerTwo == 0) {
-          return socket.to(game.roomId).emit('game:finish:winner-player-one')
+          return send('game:finish:winner-player-one')
         }
         // If the rounds are over, emit the winner
         if (game.currentRound >= game.rounds) {
           if (game.starsPlayerOne > game.starsPlayerTwo) {
-            return socket.to(game.roomId).emit('game:finish:winner-player-one')
+            return send('game:finish:winner-player-one')
           } else if (game.starsPlayerOne < game.starsPlayerTwo) {
-            return socket.to(game.roomId).emit('game:finish:winner-player-two')
+            return send('game:finish:winner-player-two')
           } else {
-            return socket.to(game.roomId).emit('game:finish:draw')
+            return send('game:finish:draw')
           }
         }
+        console.log('Emitting winner two...')
+        game.playerOneActive = null
+        game.playerTwoActive = null
         // Else complete this round
-        return socket.to(game.roomId).emit('game:round:winner-two', {
+        socket.emit('game:round:winner-two', {
+          starsPlayerOne: game.starsPlayerOne,
+          starsPlayerTwo: game.starsPlayerTwo,
+        })
+        return io.to(socket.id == game.playerOne ? game.playerTwo : game.playerOne)
+          .emit('game:round:winner-two', {
           starsPlayerOne: game.starsPlayerOne,
           starsPlayerTwo: game.starsPlayerTwo,
         })
       }
 
-      console.log("NOTHING detected!")
+      console.log("WARNING, NOTHING detected!")
     }
     // If only one card is placed, do nothing and wait for the opponent
   })
@@ -330,7 +365,7 @@ io.on('connection', socket => {
   // DONE 1. Player one places a card, nothing happens until the other is placed
   // DONE 2. Player 2 places a card, nothing happens until the other is placed
   // DONE 3. Both players place their cards: draw
-  // 4. Both players place their cards: winner one
+  // DONE 4. Both players place their cards: winner one
   // 5. Both players place their cards: winner two
   // Check that the stars are being updated
   // Check the game finishing functionality after the rounds are over
@@ -498,7 +533,7 @@ http.listen(port, '0.0.0.0', async () => {
 
 async function start() {
   try {
-    socketGames = await Game.find()
+    // socketGames = await Game.find()
     console.log("Got games from the database to the socket")
   } catch (e) {
     console.log("Couldn't get the database games")
