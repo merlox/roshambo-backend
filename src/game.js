@@ -14,6 +14,20 @@ const gameSchema = new mongoose.Schema({
       default: 'CREATED',
     },
     winner: String, // UserId winner
+    starsPlayerOne: {
+      type: Number,
+      default: 3,
+    },
+    starsPlayerTwo: {
+      type: Number,
+      default: 3,
+    },
+    currentRound: {
+      type: Number,
+      default: 1,
+    },
+    playerOneActive: String, // The current selected card can be Rock, Scissors, Paper
+    playerTwoActive: String,
 }, {
     timestamps: true,
 })

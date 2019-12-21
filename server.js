@@ -43,8 +43,6 @@ if(!argv.port) {
 }
 const port = argv.port
 
-let socketIds = []
-let socketGames = [] // Each game contains the game object including the socketId
 
 // This is to simplify everything but you should set it from the terminal
 // required to encrypt user accounts
@@ -78,6 +76,8 @@ app.use(session({
 app.use(bodyParser.json())
 app.use(bodyParser.urlencoded({extended: true}))
 
+let socketIds = []
+let socketGames = [] // Each game contains the game object
 let gameRooms = []
 io.on('connection', socket => {
   console.log('User connected', socket.id)
@@ -91,14 +91,18 @@ io.on('connection', socket => {
     console.log('User disconnected', socket.id)
     const index = socketIds.indexOf(socket.id)
     const gameExistingIndex = socketGames.map(game => game.playerOne).indexOf(socket.id)
-    socketIds.splice(index, 1) // Delete 1
+    console.log('Game existing index', gameExistingIndex)
+    if (index != -1) {
+      socketIds.splice(index, 1) // Delete 1
+    }
     if (gameExistingIndex != -1) {
       socketGames.splice(gameExistingIndex, 1)
+      console.log('Deleted game successfully on disconnect -----')
     }
     try {
       const game = await Game.findOne({playerOne: socket.id})
       // Only delete non started games
-      if (game && !game.status == 'CREATED') {
+      if (game && game.status == 'CREATED') {
         await game.deleteOne()
       }
     } catch (e) {
@@ -194,6 +198,7 @@ io.on('connection', socket => {
       }
       await game.save()
     } catch (e) {
+      console.log('Error', e)
       return issue("Error processing the join request")
     }
     const roomId = "room" + gameRooms.length
@@ -227,6 +232,111 @@ io.on('connection', socket => {
       })
     }
   })
+  socket.on('game:card-placed', async data => {
+    const issue = msg => {
+      return socket.emit('issue', { msg })
+    }
+    console.log('Card placed called')
+    const game = gameRooms.find(room => room.roomId == data.roomId)
+    if (!game) {
+      return issue('Game not found')
+    }
+    game.currentRound++
+
+    if (data.player == 'one') {
+      game.playerOneActive = data.cardType
+    } else {
+      game.playerTwoActive = data.cardType
+    }
+
+    console.log('Game rooms:', gameRooms)
+
+    // If both cards are placed, calculate result
+    if (game.playerOneActive && game.playerTwoActive) {
+      const winner = calculateWinner(game.playerOneActive, game.playerTwoActive)
+      console.log("Winner ? ", winner)
+      if (!winner) {
+        console.log('No winner deteceted, emitting round draw')
+        game.playerOneActive = null
+        game.playerTwoActive = null
+        return socket.to(game.roomId).emit('game:round:draw')
+      }
+
+      if (winner == 'one') {
+        console.log("Winner one detected!")
+        game.starsPlayerOne++
+        game.starsPlayerTwo--
+        console.log("After star change: ", game)
+        // If stars 0 for any player, emit victory
+        if (game.starsPlayerOne == 0) {
+          console.log("Player 2 wins for stars")
+          return socket.to(game.roomId).emit('game:finish:winner-player-two')
+        }
+        if (game.starsPlayerTwo == 0) {
+          console.log("Player 1 wins for stars")
+          return socket.to(game.roomId).emit('game:finish:winner-player-one')
+        }
+        // If the rounds are over, emit the winner
+        if (game.currentRound >= game.rounds) {
+          if (game.starsPlayerOne > game.starsPlayerTwo) {
+            return socket.to(game.roomId).emit('game:finish:winner-player-one')
+          } else if (game.starsPlayerOne < game.starsPlayerTwo) {
+            return socket.to(game.roomId).emit('game:finish:winner-player-two')
+          } else {
+            return socket.to(game.roomId).emit('game:finish:draw')
+          }
+        }
+        // Else complete this round
+        return socket.to(game.roomId).emit('game:round:winner-one', {
+          starsPlayerOne: game.starsPlayerOne,
+          starsPlayerTwo: game.starsPlayerTwo,
+        })
+      }
+
+      if (winner == 'two') {
+        console.log("Winner two detected!")
+        game.starsPlayerOne--
+        game.starsPlayerTwo++
+        // If stars 0 for any player, emit victory
+        if (game.starsPlayerOne == 0) {
+          return socket.to(game.roomId).emit('game:finish:winner-player-two')
+        }
+        if (game.starsPlayerTwo == 0) {
+          return socket.to(game.roomId).emit('game:finish:winner-player-one')
+        }
+        // If the rounds are over, emit the winner
+        if (game.currentRound >= game.rounds) {
+          if (game.starsPlayerOne > game.starsPlayerTwo) {
+            return socket.to(game.roomId).emit('game:finish:winner-player-one')
+          } else if (game.starsPlayerOne < game.starsPlayerTwo) {
+            return socket.to(game.roomId).emit('game:finish:winner-player-two')
+          } else {
+            return socket.to(game.roomId).emit('game:finish:draw')
+          }
+        }
+        // Else complete this round
+        return socket.to(game.roomId).emit('game:round:winner-two', {
+          starsPlayerOne: game.starsPlayerOne,
+          starsPlayerTwo: game.starsPlayerTwo,
+        })
+      }
+
+      console.log("NOTHING detected!")
+    }
+    // If only one card is placed, do nothing and wait for the opponent
+  })
+
+  // TODO Check the following scenarios
+  // DONE 1. Player one places a card, nothing happens until the other is placed
+  // DONE 2. Player 2 places a card, nothing happens until the other is placed
+  // DONE 3. Both players place their cards: draw
+  // 4. Both players place their cards: winner one
+  // 5. Both players place their cards: winner two
+  // Check that the stars are being updated
+  // Check the game finishing functionality after the rounds are over
+  // Game finishing when stars are over
+  // Game finishing when timeout is reached
+  // Crear una AI que simule movimientos randoms
 
   socket.on('setup:login-with-crypto', async data => {
     const issue = msg => {
@@ -405,5 +515,29 @@ function protectRoute(req, res, next) {
       ok: false,
       msg: 'You must be logged to do that action',
     })
+  }
+}
+
+function calculateWinner(cardOne, cardTwo) {
+  if (cardOne == cardTwo) {
+    return false
+  }
+  if (cardOne == 'Rock' && cardTwo == 'Scissors') {
+    return 'one'
+  }
+  if (cardOne == 'Rock' && cardTwo == 'Paper') {
+    return 'two'
+  }
+  if (cardOne == 'Scissors' && cardTwo == 'Rock') {
+    return 'two'
+  }
+  if (cardOne == 'Scissors' && cardTwo == 'Paper') {
+    return 'one'
+  }
+  if (cardOne == 'Paper' && cardTwo == 'Rock') {
+    return 'one'
+  }
+  if (cardOne == 'Paper' && cardTwo == 'Scissors') {
+    return 'two'
   }
 }
