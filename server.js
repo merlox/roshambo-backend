@@ -250,17 +250,85 @@ io.on('connection', socket => {
   })
   socket.on('game:card-placed', async data => {
     console.log('Card placed called')
-    const issue = msg => {
+    const game = gameRooms.find(room => room.roomId == data.roomId)
+    if (!game) return issue('Game not found')
+    // To delete a game room from the active ones in the rooms and socketGames
+    // arrays while marking the database model as completed
+    function issue(msg) {
       return socket.emit('issue', { msg })
     }
-    const game = gameRooms.find(room => room.roomId == data.roomId)
-    if (!game) {
-      return issue('Game not found')
+    async function deleteRoom (winner) {
+      const roomIndex = gameRooms.map(room => room.roomId).indexOf(data.roomId)
+      if (roomIndex != -1) gameRooms.splice(roomIndex, 1)
+      let socketGamesIndex = socketGames.map(sock => sock.playerOne).indexOf(game.playerOne)
+      if (socketGamesIndex != -1) socketGames.splice(socketGamesIndex, 1)
+      try {
+        const dbGame = await Game.findOne({playerOne: game.playerOne})
+        dbGame.status = 'COMPLETED'
+        dbGame.winner = winner
+        await dbGame.save()
+      } catch (e) {
+        console.log('Error', e)
+        console.log('Error deleting socket games from the database:', socket.id)
+      }
     }
-    const send = endpoint => {
+    function emitRoundOver (result) {
+      socket.emit(`game:round:${result}`, {
+        starsPlayerOne: game.starsPlayerOne,
+        starsPlayerTwo: game.starsPlayerTwo,
+        playerOneActive: game.playerOneActive,
+        playerTwoActive: game.playerTwoActive,
+      })
+      io.to(socket.id == game.playerOne ? game.playerTwo : game.playerOne)
+        .emit(`game:round:${result}`, {
+          starsPlayerOne: game.starsPlayerOne,
+          starsPlayerTwo: game.starsPlayerTwo,
+          playerOneActive: game.playerOneActive,
+          playerTwoActive: game.playerTwoActive,
+      })
+      game.playerOneActive = null
+      game.playerTwoActive = null
+    }
+    function send(endpoint) {
       const isPlayerOne = socket.id == game.playerOne
       socket.emit(endpoint)
-      return io.to(isPlayerOne ? game.playerTwo : game.playerOne).emit(endpoint)
+      io.to(isPlayerOne ? game.playerTwo : game.playerOne).emit(endpoint)
+    }
+    function checkFinishGame() {
+      // If stars 0 for any player, emit victory
+      if (game.starsPlayerOne == 0) {
+        console.log("GAME OVER Player 2 wins for stars")
+        deleteRoom(game.playerTwo)
+        send('game:finish:winner-player-two')
+        return true
+      }
+      if (game.starsPlayerTwo == 0) {
+        console.log("GAME OVER Player 1 wins for stars")
+        deleteRoom(game.playerOne)
+        send('game:finish:winner-player-one')
+        return true
+      }
+      // If the rounds are over, emit the winner
+      if (game.currentRound >= game.rounds) {
+        console.log("All rounds over, emiting winner:")
+        if (game.starsPlayerOne > game.starsPlayerTwo) {
+          console.log("GAME OVER Winner player one for rounds over")
+          deleteRoom(game.playerOne)
+          send('game:finish:winner-player-one')
+          return true
+        } else if (game.starsPlayerOne < game.starsPlayerTwo) {
+          console.log("GAME OVER Winner player two for rounds over")
+          deleteRoom(game.playerTwo)
+          send('game:finish:winner-player-two')
+          return true
+        } else {
+          console.log("GAME OVER DRAW")
+          deleteRoom('draw')
+          send('game:finish:draw')
+          return true
+        }
+      }
+      return false
     }
     if (socket.id == game.playerOne) {
       game.playerOneActive = data.cardType
@@ -275,94 +343,26 @@ io.on('connection', socket => {
       game.currentRound++
       const winner = calculateWinner(game.playerOneActive, game.playerTwoActive)
 
-      if (!winner) {
-        console.log('No winner detected, emitting round draw')
-        game.playerOneActive = null
-        game.playerTwoActive = null
-        return send('game:round:draw')
+      switch (winner) {
+        case false:
+          console.log('No winner detected, emitting round draw')
+          return emitRoundOver('draw')
+          break
+        case 'one':
+          console.log("Winner one detected!")
+          game.starsPlayerOne++
+          game.starsPlayerTwo--
+          break
+        case 'two':
+          console.log("Winner two detected!")
+          game.starsPlayerOne--
+          game.starsPlayerTwo++
+          break
       }
 
-      if (winner == 'one') {
-        console.log("Winner one detected!")
-        game.starsPlayerOne++
-        game.starsPlayerTwo--
-        console.log("After star change: ", game)
-        // If stars 0 for any player, emit victory
-        if (game.starsPlayerOne == 0) {
-          console.log("GAME OVER Player 2 wins for stars")
-          return send('game:finish:winner-player-two')
-        }
-        if (game.starsPlayerTwo == 0) {
-          console.log("GAME OVER Player 1 wins for stars")
-          return send('game:finish:winner-player-one')
-        }
-        // If the rounds are over, emit the winner
-        if (game.currentRound >= game.rounds) {
-          console.log("All rounds over, emiting winner:")
-          if (game.starsPlayerOne > game.starsPlayerTwo) {
-            console.log("GAME OVER Winner player one")
-            return send('game:finish:winner-player-one')
-          } else if (game.starsPlayerOne < game.starsPlayerTwo) {
-            console.log("GAME OVER Winner player two")
-            return send('game:finish:winner-player-two')
-          } else {
-            console.log("GAME OVER DRAW")
-            return send('game:finish:draw')
-          }
-        }
-        console.log("Emiting winner one round...")
-        game.playerOneActive = null
-        game.playerTwoActive = null
-
-        // Else complete this round
-        socket.emit('game:round:winner-one', {
-          starsPlayerOne: game.starsPlayerOne,
-          starsPlayerTwo: game.starsPlayerTwo,
-        })
-        return io.to(socket.id == game.playerOne ? game.playerTwo : game.playerOne)
-          .emit('game:round:winner-one', {
-          starsPlayerOne: game.starsPlayerOne,
-          starsPlayerTwo: game.starsPlayerTwo,
-        })
-      }
-
-      if (winner == 'two') {
-        console.log("Winner two detected!")
-        game.starsPlayerOne--
-        game.starsPlayerTwo++
-        // If stars 0 for any player, emit victory
-        if (game.starsPlayerOne == 0) {
-          return send('game:finish:winner-player-two')
-        }
-        if (game.starsPlayerTwo == 0) {
-          return send('game:finish:winner-player-one')
-        }
-        // If the rounds are over, emit the winner
-        if (game.currentRound >= game.rounds) {
-          if (game.starsPlayerOne > game.starsPlayerTwo) {
-            return send('game:finish:winner-player-one')
-          } else if (game.starsPlayerOne < game.starsPlayerTwo) {
-            return send('game:finish:winner-player-two')
-          } else {
-            return send('game:finish:draw')
-          }
-        }
-        console.log('Emitting winner two...')
-        game.playerOneActive = null
-        game.playerTwoActive = null
-        // Else complete this round
-        socket.emit('game:round:winner-two', {
-          starsPlayerOne: game.starsPlayerOne,
-          starsPlayerTwo: game.starsPlayerTwo,
-        })
-        return io.to(socket.id == game.playerOne ? game.playerTwo : game.playerOne)
-          .emit('game:round:winner-two', {
-          starsPlayerOne: game.starsPlayerOne,
-          starsPlayerTwo: game.starsPlayerTwo,
-        })
-      }
-
-      console.log("WARNING, NOTHING detected!")
+      const isThereAWinner = checkFinishGame()
+      if (isThereAWinner) return
+      else return emitRoundOver(`winner-${winner}`)
     }
     // If only one card is placed, do nothing and wait for the opponent
   })
@@ -374,11 +374,13 @@ io.on('connection', socket => {
   // DONE 4. Both players place their cards: winner one
   // DONE 5. Both players place their cards: winner two
   // DONE Check that the stars are being updated
-  // Check the game finishing functionality after the rounds are over
+  // DONE Check the game finishing functionality after the rounds are over
   // Game finishing when stars are over
   // Game finishing when timeout is reached
-  // Make sure the second player sees the cards on the other side
+  // Game finishing when all rounds all cards are used (check stars)
+  // DONE Make sure the second player sees the cards on the other side
   // Animate card movements when both have placed
+  // DONE Game is deleted after finishing but saved in the database as completed
 
   socket.on('setup:login-with-crypto', async data => {
     const issue = msg => {
