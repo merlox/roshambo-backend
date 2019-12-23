@@ -76,11 +76,39 @@ app.use(session({
 app.use(bodyParser.json())
 app.use(bodyParser.urlencoded({extended: true}))
 
+
 let socketIds = []
 // Games shown on the matchmaking scene
 let socketGames = []
 // Active games played by people in a room
 let gameRooms = []
+
+async function deleteGame(socket) {
+  const index = socketIds.indexOf(socket.id)
+  const gameExistingIndex = socketGames.map(game => game.playerOne).indexOf(socket.id)
+  if (index != -1) {
+    socketIds.splice(index, 1) // Delete 1
+  }
+  if (gameExistingIndex != -1) {
+    socketGames.splice(gameExistingIndex, 1)
+    console.log('Deleted game successfully')
+  }
+  try {
+    const game = await Game.findOne({playerOne: socket.id})
+    // Only delete non started games from the database
+    if (game && game.status == 'CREATED') {
+      await game.deleteOne()
+    }
+  } catch (e) {
+    console.log('Error', e)
+    console.log('Error deleting socket games from the database:', socket.id)
+  }
+  // Emit the updated games to all players
+  io.emit('game:get-games', {
+    data: socketGames,
+  })
+}
+
 io.on('connection', socket => {
   console.log('User connected', socket.id)
   socketIds.push(socket.id)
@@ -91,26 +119,7 @@ io.on('connection', socket => {
   })
   socket.on('disconnect', async () => {
     console.log('User disconnected', socket.id)
-    const index = socketIds.indexOf(socket.id)
-    const gameExistingIndex = socketGames.map(game => game.playerOne).indexOf(socket.id)
-    console.log('Game existing index', gameExistingIndex)
-    if (index != -1) {
-      socketIds.splice(index, 1) // Delete 1
-    }
-    if (gameExistingIndex != -1) {
-      socketGames.splice(gameExistingIndex, 1)
-      console.log('Deleted game successfully on disconnect -----')
-    }
-    try {
-      const game = await Game.findOne({playerOne: socket.id})
-      // Only delete non started games
-      if (game && game.status == 'CREATED') {
-        await game.deleteOne()
-      }
-    } catch (e) {
-      console.log('Error', e)
-      console.log('Error deleting socket games from the database:', socket.id)
-    }
+    deleteGame(socket)
   })
   socket.on('game:create', async data => {
     const issue = msg => {
@@ -137,7 +146,8 @@ io.on('connection', socket => {
       playerTwo: null,
       gameName: data.gameName,
       gameType: data.gameType,
-      rounds: data.rounds,
+      // All rounds means use all the 9 cards
+      rounds: data.gameType == 'All cards' ? 10 : data.rounds,
       moveTimer: data.moveTimer,
       currentRound: 1,
       playerOneActive: null,
@@ -226,6 +236,7 @@ io.on('connection', socket => {
       playerTwoActive: null,
       starsPlayerOne: 3,
       starsPlayerTwo: 3,
+      timeout: null,
     }
     gameRooms.push(room)
     socket.join(roomId)
@@ -235,23 +246,27 @@ io.on('connection', socket => {
     io.to(data.playerOne).emit('game:join-complete', room)
   })
   socket.on('game:delete', async () => {
-    const gameExistingIndex = socketGames.map(game => game.playerOne).indexOf(socket.id)
-    if (gameExistingIndex != -1) {
-      socketGames.splice(gameExistingIndex, 1)
-    }
-    try {
-      await Game.findOneAndRemove({playerOne: socket.id})
-    } catch (e) {
-      console.log('Error', e)
-      return socket.emit('issue', {
-        msg: 'Error deleting the game',
-      })
-    }
+    deleteGame(socket)
   })
   socket.on('game:card-placed', async data => {
     console.log('Card placed called')
+    let lastCardPlacedByPlayer
     const game = gameRooms.find(room => room.roomId == data.roomId)
     if (!game) return issue('Game not found')
+    clearTimeout(game.timeout)
+    const timer = (parseInt(game.moveTimer) + 2) * 1e3
+    let counter = new Date().getTime()
+    game.timeout = setTimeout(() => {
+      console.log('Timeout called after', new Date().getTime() - counter, 'seconds')
+      if (lastCardPlacedByPlayer == 'one') {
+        console.log('TIMEOUT player two')
+        return send('game:finish:winner-player-one')
+      } else {
+        console.log('TIMEOUT player one')
+        return send('game:finish:winner-player-two')
+      }
+    }, timer) // Extra 2 for animation transitions
+
     // To delete a game room from the active ones in the rooms and socketGames
     // arrays while marking the database model as completed
     function issue(msg) {
@@ -289,8 +304,11 @@ io.on('connection', socket => {
       game.playerOneActive = null
       game.playerTwoActive = null
     }
+    // To send the finishing message
     function send(endpoint) {
       const isPlayerOne = socket.id == game.playerOne
+      game.timeout = clearTimeout(game.timeout)
+      deleteGame(socket)
       socket.emit(endpoint)
       io.to(isPlayerOne ? game.playerTwo : game.playerOne).emit(endpoint)
     }
@@ -308,8 +326,13 @@ io.on('connection', socket => {
         send('game:finish:winner-player-one')
         return true
       }
-      // If the rounds are over, emit the winner
-      if (game.currentRound >= game.rounds) {
+
+      // If the rounds are over OR the timeout is reached, emit the winner
+      // this includes the 9 max rounds for All rounds mode
+      console.log('---- ROUND CHECK 1 ----', parseInt(game.currentRound) >= parseInt(game.rounds))
+      console.log('---- ROUND CHECK 2 ----', parseInt(game.currentRound))
+      console.log('---- ROUND CHECK 3 ----', parseInt(game.rounds))
+      if (parseInt(game.currentRound) >= parseInt(game.rounds)) {
         console.log("All rounds over, emiting winner:")
         if (game.starsPlayerOne > game.starsPlayerTwo) {
           console.log("GAME OVER Winner player one for rounds over")
@@ -330,10 +353,13 @@ io.on('connection', socket => {
       }
       return false
     }
+
     if (socket.id == game.playerOne) {
       game.playerOneActive = data.cardType
+      lastCardPlacedByPlayer = 'one'
     } else {
       game.playerTwoActive = data.cardType
+      lastCardPlacedByPlayer = 'two'
     }
 
     console.log('Game rooms:', gameRooms)
@@ -342,32 +368,35 @@ io.on('connection', socket => {
     if (game.playerOneActive && game.playerTwoActive) {
       game.currentRound++
       const winner = calculateWinner(game.playerOneActive, game.playerTwoActive)
+      let winnerText = ''
 
       switch (winner) {
         case false:
           console.log('No winner detected, emitting round draw')
-          return emitRoundOver('draw')
+          winnerText = 'draw'
           break
         case 'one':
           console.log("Winner one detected!")
           game.starsPlayerOne++
           game.starsPlayerTwo--
+          winnerText = 'winner-one'
           break
         case 'two':
           console.log("Winner two detected!")
           game.starsPlayerOne--
           game.starsPlayerTwo++
+          winnerText = 'winner-two'
           break
       }
 
       const isThereAWinner = checkFinishGame()
       if (isThereAWinner) return
-      else return emitRoundOver(`winner-${winner}`)
+      else return emitRoundOver(winnerText)
     }
     // If only one card is placed, do nothing and wait for the opponent
   })
 
-  // TODO Check the following scenarios
+  // DONE TODO Check the following scenarios
   // DONE 1. Player one places a card, nothing happens until the other is placed
   // DONE 2. Player 2 places a card, nothing happens until the other is placed
   // DONE 3. Both players place their cards: draw
@@ -375,11 +404,13 @@ io.on('connection', socket => {
   // DONE 5. Both players place their cards: winner two
   // DONE Check that the stars are being updated
   // DONE Check the game finishing functionality after the rounds are over
-  // Game finishing when stars are over
-  // Game finishing when timeout is reached
-  // Game finishing when all rounds all cards are used (check stars)
+  // DONE CHECK WINNING BY TIMEOUT
+  // DONE CHECK WINNING BY ALL CARDS MODE
+  // DONE Game finishing when stars are over
+  // DONE Game finishing when timeout is reached
+  // DONE Game finishing when all rounds all cards are used (check stars)
   // DONE Make sure the second player sees the cards on the other side
-  // Animate card movements when both have placed
+  // DONE Animate card movements when both have placed
   // DONE Game is deleted after finishing but saved in the database as completed
 
   socket.on('setup:login-with-crypto', async data => {
