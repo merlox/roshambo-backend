@@ -329,9 +329,6 @@ io.on('connection', socket => {
 
       // If the rounds are over OR the timeout is reached, emit the winner
       // this includes the 9 max rounds for All rounds mode
-      console.log('---- ROUND CHECK 1 ----', parseInt(game.currentRound) >= parseInt(game.rounds))
-      console.log('---- ROUND CHECK 2 ----', parseInt(game.currentRound))
-      console.log('---- ROUND CHECK 3 ----', parseInt(game.rounds))
       if (parseInt(game.currentRound) >= parseInt(game.rounds)) {
         console.log("All rounds over, emiting winner:")
         if (game.starsPlayerOne > game.starsPlayerTwo) {
@@ -412,6 +409,14 @@ io.on('connection', socket => {
   // DONE Make sure the second player sees the cards on the other side
   // DONE Animate card movements when both have placed
   // DONE Game is deleted after finishing but saved in the database as completed
+  // √ CHECK - all rounds
+  // √ CHECK - 0 rounds
+  // √ CHECK - check move timer
+  // √ CHECK - check game deletion after completion
+  // √ CHECK - fix repeated games when a new one is added from another game in matchmaking
+  // √ CHECK - update deleted game on all clients
+  // √ CHECK - add visual timer
+  // √ CHECK - make sure the coroutine is stopped to reset the timer
 
   socket.on('setup:login-with-crypto', async data => {
     const issue = msg => {
