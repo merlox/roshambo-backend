@@ -141,6 +141,8 @@ io.on('connection', socket => {
       return issue('The round type is invalid')
     }
     const gameObject = {
+      isPrivateGame: data.qrData ? true : false,
+      qrData: data.qrData,
       roomId: null,
       playerOne: socket.id,
       playerTwo: null,
@@ -162,8 +164,9 @@ io.on('connection', socket => {
         msg: 'You can only create one game per user',
       })
     }
+    let newGame
     try {
-      let newGame = new Game(gameObject)
+      newGame = new Game(gameObject)
       await newGame.save()
     } catch (e) {
       return issue("Error creating the new game")
@@ -171,11 +174,13 @@ io.on('connection', socket => {
     socketGames.push(gameObject)
     io.emit('game:create-complete', {
       msg: 'The game has been created successfully',
+      id: newGame._id, // New game id
     })
   })
   socket.on('game:get-games', () => {
+    const onlyPublicGames = socketGames.filter(game => !game.isPrivateGame)
     socket.emit('game:get-games', {
-      data: socketGames,
+      data: onlyPublicGames,
     })
   })
   socket.on('game:join', async data => {
@@ -224,6 +229,8 @@ io.on('connection', socket => {
     const roomId = "room" + gameRooms.length
 
     const room = {
+      isPrivateGame: data.isPrivateGame,
+      qrData: data.qrData,
       roomId,
       playerOne: data.playerOne,
       playerTwo: data.playerTwo,
@@ -391,6 +398,39 @@ io.on('connection', socket => {
       else return emitRoundOver(winnerText)
     }
     // If only one card is placed, do nothing and wait for the opponent
+  })
+  socket.on('game:join-private-game', async data => {
+    const issue = msg => {
+      console.log('Called issue', msg)
+      return socket.emit('issue', { msg })
+    }
+    if (!data.gameId || data.gameId.length == 0) {
+      return issue("Game code is missing")
+    }
+    let game
+    try {
+      game = await Game.findOne({_id: data.gameId})
+      if (!game) {
+        return issue("Game not found")
+      }
+    } catch (e) {
+      return issue("Game not found")
+    }
+    const roomId = "room" + gameRooms.length
+    game.roomId = roomId
+    game.playerTwo = socket.id
+    game.status = 'STARTED'
+    // Update the game with the room and state
+    try {
+      await game.save()
+    } catch (e) {
+      return issue("Error joining the game")
+    }
+    gameRooms.push(game)
+    socket.join(roomId)
+    // Emit event to inform the users
+    socket.emit('game:join-complete', game)
+    io.to(game.playerOne).emit('game:join-complete', game)
   })
 
   // DONE TODO Check the following scenarios
