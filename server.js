@@ -1,6 +1,6 @@
 require('dotenv-safe').config()
 
-const { FORGOT_PASSWORD_DOMAIN } = process.env
+const { FORGOT_PASSWORD_DOMAIN, TRON_PRIVATE_KEY, GAME_CONTRACT } = process.env
 const express = require('express')
 const bodyParser = require('body-parser')
 const limiter = require('express-rate-limit')
@@ -29,8 +29,18 @@ const tronWeb = new TronWeb({
   fullNode: 'https://api.shasta.trongrid.io',
   solidityNode: 'https://api.shasta.trongrid.io',
   eventServer: 'https://api.shasta.trongrid.io',
+  privateKey: TRON_PRIVATE_KEY,
 })
 const tronGrid = new TronGrid(tronWeb)
+
+// Addresses
+const myAddress = "TNiVeT2TUDaKX1cjH6ejsj79aR2m1FUwJ8"
+const contractAddress = GAME_CONTRACT
+tronWeb.defaultAddress = {
+  hex: tronWeb.address.toHex(myAddress),
+  base58: myAddress
+}
+let contractInstance
 
 const argv = yargs.option('port', {
     alias: 'p',
@@ -42,7 +52,6 @@ if(!argv.port) {
     process.exit(0)
 }
 const port = argv.port
-
 
 // This is to simplify everything but you should set it from the terminal
 // required to encrypt user accounts
@@ -156,6 +165,8 @@ io.on('connection', socket => {
       playerTwoActive: null,
       starsPlayerOne: 3,
       starsPlayerTwo: 3,
+      cardsUsedPlayerOne: [],
+      cardsUsedPlayerTwo: [],
     }
 
     const gameExisting = socketGames.map(game => game.playerOne).find(playerOne => playerOne == socket.id)
@@ -227,6 +238,13 @@ io.on('connection', socket => {
       return issue("Error processing the join request")
     }
     const roomId = "room" + gameRooms.length
+    let latestLeagueInfo = null
+
+    try {
+      latestLeagueInfo = await contractInstance.getLatestLeagueInfo().call()
+    } catch (e) {
+      console.log('No league found, sending empty game stats...')
+    }
 
     const room = {
       isPrivateGame: data.isPrivateGame,
@@ -244,7 +262,18 @@ io.on('connection', socket => {
       starsPlayerOne: 3,
       starsPlayerTwo: 3,
       timeout: null,
+      leagueRocksInGame: 0,
+      leaguePapersInGame: 0,
+      leagueScissorsInGame: 0,
+      cardsUsedPlayerOne: [],
+      cardsUsedPlayerTwo: [],
     }
+    if (latestLeagueInfo) {
+      room.leagueRocksInGame = parseInt(latestLeagueInfo[0]._hex)
+      room.leaguePapersInGame = parseInt(latestLeagueInfo[1]._hex)
+      room.leagueScissorsInGame = parseInt(latestLeagueInfo[2]._hex)
+    }
+
     gameRooms.push(room)
     socket.join(roomId)
 
@@ -266,10 +295,8 @@ io.on('connection', socket => {
     game.timeout = setTimeout(() => {
       console.log('Timeout called after', new Date().getTime() - counter, 'seconds')
       if (lastCardPlacedByPlayer == 'one') {
-        console.log('TIMEOUT player two')
         return send('game:finish:winner-player-one')
       } else {
-        console.log('TIMEOUT player one')
         return send('game:finish:winner-player-two')
       }
     }, timer) // Extra 2 for animation transitions
@@ -366,7 +393,8 @@ io.on('connection', socket => {
       lastCardPlacedByPlayer = 'two'
     }
 
-    console.log('Game rooms:', gameRooms)
+    // DELETE the placed card from the contract forever
+    await contractInstance.deleteCard(data.sender, data.cardType).send()
 
     // If both cards are placed, calculate result
     if (game.playerOneActive && game.playerTwoActive) {
@@ -417,9 +445,28 @@ io.on('connection', socket => {
       return issue("Game not found")
     }
     const roomId = "room" + gameRooms.length
+    let latestLeagueInfo = null
+    try {
+      latestLeagueInfo = await contractInstance.getLatestLeagueInfo().call()
+    } catch (e) {
+      console.log('No league found, sending empty game stats...')
+    }
     game.roomId = roomId
     game.playerTwo = socket.id
     game.status = 'STARTED'
+    game.cardsUsedPlayerOne = []
+    game.cardsUsedPlayerTwo = []
+
+    if (latestLeagueInfo) {
+      room.leagueRocksInGame = parseInt(latestLeagueInfo[0]._hex)
+      room.leaguePapersInGame = parseInt(latestLeagueInfo[1]._hex)
+      room.leagueScissorsInGame = parseInt(latestLeagueInfo[2]._hex)
+    } else {
+      game.leagueRocksInGame = 0
+      game.leaguePapersInGame = 0
+      game.leagueScissorsInGame = 0
+    }
+
     // Update the game with the room and state
     try {
       await game.save()
@@ -431,6 +478,48 @@ io.on('connection', socket => {
     // Emit event to inform the users
     socket.emit('game:join-complete', game)
     io.to(game.playerOne).emit('game:join-complete', game)
+  })
+
+  // Returns the league data
+  socket.on('tron:buy-cards', async data => {
+    const issue = msg => {
+      return socket.emit('issue', { msg })
+    }
+    console.log('1')
+    if (!data.cardsToBuy) {
+      return issue("You need to specify how many cards you want to purchase")
+    }
+    console.log('2')
+    let transaction
+    try {
+      console.log('3')
+      transaction = await contractInstance.buyCards(data.cardsToBuy).send({
+        callValue: tronWeb.toSun(10) * data.cardsToBuy,
+      })
+      console.log('4')
+    } catch (e) {
+      console.log('The card buying transaction failed...')
+      return issue("The card buying transaction failed")
+    }
+    console.log('5')
+    socket.emit('tron:buy-cards-complete')
+  })
+
+  // Gets your cards with id and all
+  socket.on('tron:get-my-cards', async () => {
+    const issue = msg => {
+      return socket.emit('issue', { msg })
+    }
+    let cards
+    try {
+      cards = await contractInstance.getMyCards().call()
+    } catch (e) {
+      console.log('Error getting your cards')
+      return issue("Error getting your cards")
+    }
+    socket.emit('tron:get-my-cards', {
+      data: cards, // Rocks then papers then scissors
+    })
   })
 
   // DONE TODO Check the following scenarios
@@ -618,10 +707,11 @@ http.listen(port, '0.0.0.0', async () => {
 
 async function start() {
   try {
-    // socketGames = await Game.find()
-    console.log("Got games from the database to the socket")
+    console.log("Setting up the game contract...")
+    contractInstance = await tronWeb.contract().at(contractAddress)
+    console.log("Done!")
   } catch (e) {
-    console.log("Couldn't get the database games")
+    console.log("Error setting up the game contract", e)
   }
 }
 
