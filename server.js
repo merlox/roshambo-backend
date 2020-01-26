@@ -499,7 +499,6 @@ io.on('connection', socket => {
         privateKey: data.privateKey,
       })
       tronGrid = new TronGrid(tronWeb)
-      console.log('Buyer:', data.account, 'Private key:', data.privateKey)
       transaction = await contractInstance.buyCards(data.cardsToBuy).send({
         callValue: tronWeb.toSun(10) * data.cardsToBuy,
         from: data.account,
@@ -534,7 +533,6 @@ io.on('connection', socket => {
       cards = await contractInstance.getMyCards().call({
         from: data.account,
       })
-      console.log('Cards received:', cards, 'Owner:', data.account)
     } catch (e) {
       console.log('Error getting your cards')
       return issue("Error getting your cards")
