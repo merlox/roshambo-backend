@@ -6,7 +6,6 @@ const bodyParser = require('body-parser')
 const limiter = require('express-rate-limit')
 const path = require('path')
 const app = express()
-const jwt = require('jsonwebtoken')
 const User = require('./src/user')
 const ForgotPasswordToken = require('./src/forgotPasswordToken')
 const Game = require('./src/game')
@@ -25,13 +24,13 @@ const io = require('socket.io')(http)
 
 // TODO Change the fullhost to mainnet: https://api.trongrid.io
 // Instead of testnet: https://api.shasta.trongrid.io
-const tronWeb = new TronWeb({
+let tronWeb = new TronWeb({
   fullNode: 'https://api.shasta.trongrid.io',
   solidityNode: 'https://api.shasta.trongrid.io',
   eventServer: 'https://api.shasta.trongrid.io',
   privateKey: TRON_PRIVATE_KEY,
 })
-const tronGrid = new TronGrid(tronWeb)
+let tronGrid = new TronGrid(tronWeb)
 
 // Addresses
 const myAddress = "TNiVeT2TUDaKX1cjH6ejsj79aR2m1FUwJ8"
@@ -485,34 +484,57 @@ io.on('connection', socket => {
     const issue = msg => {
       return socket.emit('issue', { msg })
     }
-    console.log('1')
     if (!data.cardsToBuy) {
       return issue("You need to specify how many cards you want to purchase")
     }
-    console.log('2')
+    if (!data.account) {
+      return issue("Account not received")
+    }
     let transaction
     try {
-      console.log('3')
+      tronWeb = new TronWeb({
+        fullNode: 'https://api.shasta.trongrid.io',
+        solidityNode: 'https://api.shasta.trongrid.io',
+        eventServer: 'https://api.shasta.trongrid.io',
+        privateKey: data.privateKey,
+      })
+      tronGrid = new TronGrid(tronWeb)
+      console.log('Buyer:', data.account, 'Private key:', data.privateKey)
       transaction = await contractInstance.buyCards(data.cardsToBuy).send({
         callValue: tronWeb.toSun(10) * data.cardsToBuy,
+        from: data.account,
       })
-      console.log('4')
     } catch (e) {
-      console.log('The card buying transaction failed...')
+      console.log('The card buying transaction failed...', e)
       return issue("The card buying transaction failed")
     }
-    console.log('5')
     socket.emit('tron:buy-cards-complete')
   })
 
   // Gets your cards with id and all
-  socket.on('tron:get-my-cards', async () => {
+  socket.on('tron:get-my-cards', async data => {
+    let cards = []
     const issue = msg => {
       return socket.emit('issue', { msg })
     }
-    let cards
+    console.log('Data received', data)
+    if (!data.privateKey || data.privateKey.length == 0) {
+      console.log('Private key not received')
+      return issue('Private key not received')
+    }
+    tronWeb = new TronWeb({
+      fullNode: 'https://api.shasta.trongrid.io',
+      solidityNode: 'https://api.shasta.trongrid.io',
+      eventServer: 'https://api.shasta.trongrid.io',
+      privateKey: data.privateKey,
+    })
+    tronGrid = new TronGrid(tronWeb)
+    contractInstance = await tronWeb.contract().at(contractAddress)
     try {
-      cards = await contractInstance.getMyCards().call()
+      cards = await contractInstance.getMyCards().call({
+        from: data.account,
+      })
+      console.log('Cards received:', cards, 'Owner:', data.account)
     } catch (e) {
       console.log('Error getting your cards')
       return issue("Error getting your cards")
@@ -521,31 +543,6 @@ io.on('connection', socket => {
       data: cards, // Rocks then papers then scissors
     })
   })
-
-  // DONE TODO Check the following scenarios
-  // DONE 1. Player one places a card, nothing happens until the other is placed
-  // DONE 2. Player 2 places a card, nothing happens until the other is placed
-  // DONE 3. Both players place their cards: draw
-  // DONE 4. Both players place their cards: winner one
-  // DONE 5. Both players place their cards: winner two
-  // DONE Check that the stars are being updated
-  // DONE Check the game finishing functionality after the rounds are over
-  // DONE CHECK WINNING BY TIMEOUT
-  // DONE CHECK WINNING BY ALL CARDS MODE
-  // DONE Game finishing when stars are over
-  // DONE Game finishing when timeout is reached
-  // DONE Game finishing when all rounds all cards are used (check stars)
-  // DONE Make sure the second player sees the cards on the other side
-  // DONE Animate card movements when both have placed
-  // DONE Game is deleted after finishing but saved in the database as completed
-  // √ CHECK - all rounds
-  // √ CHECK - 0 rounds
-  // √ CHECK - check move timer
-  // √ CHECK - check game deletion after completion
-  // √ CHECK - fix repeated games when a new one is added from another game in matchmaking
-  // √ CHECK - update deleted game on all clients
-  // √ CHECK - add visual timer
-  // √ CHECK - make sure the coroutine is stopped to reset the timer
 
   socket.on('setup:login-with-crypto', async data => {
     const issue = msg => {
@@ -603,6 +600,64 @@ io.on('connection', socket => {
       return issue("Error processing the request on the server")
     }
   })
+  socket.on('setup:login-with-crypto-private-key', async data => {
+    const issue = msg => {
+      return socket.emit('issue', { msg })
+    }
+    let responseMsg
+    try {
+      if (!data.privateKey || data.privateKey.length == 0) {
+        return issue("Private key not received")
+      }
+      data.privateKey = data.privateKey.trim()
+      let foundUser = await User.findOne({privateKey: data.privateKey})
+      let userId
+      // Existing account, login
+      if (foundUser) {
+        // Log in for that found user
+        userId = socket.id;
+        responseMsg = "User logged in successfully"
+      } else {
+        // New account, register
+        let newUser = new User({
+          privateKey: data.privateKey,
+        })
+        try {
+          await newUser.save()
+        } catch (e) {
+          console.log("Error saving new private key user", e)
+          return issue("Error saving your new account")
+        }
+        userId = socket.id;
+        responseMsg = "New user created successfully"
+      }
+      const userAddress = tronWeb.address.fromPrivateKey(data.privateKey)
+      let balance = (await tronGrid.account.get(userAddress))
+      if (!balance.data || balance.data.length == 0) {
+        balance = 0
+      } else {
+        balance = balance.data[0].balance
+      }
+      console.log('Balance', balance)
+      socket['user'] = {
+        userId,
+        userAddress,
+        balance,
+      }
+      return socket.emit('setup:login-complete', {
+        response: {
+          msg: responseMsg,
+          userId,
+          userAddress,
+          privateKey: data.privateKey,
+          balance,
+        },
+      })
+    } catch (e) {
+      console.log("Error processing the request", e)
+      return issue("Error processing the request on the server")
+    }
+  })
   socket.on('setup:login', async data => {
     const issue = msg => {
       return socket.emit('issue', { msg })
@@ -627,21 +682,23 @@ io.on('connection', socket => {
         return issue('User found but the password is invalid')
       }
       const userId = socket.id;
-      const userAddress = (new TronAddress(foundUser.mnemonic, 0)).master
-      console.log('User address', userAddress)
+      const userAddress = await tronWeb.address.fromPrivateKey(foundUser.privateKey)
       const balance = await tronWeb.trx.getBalance(userAddress)
       console.log('Balance', balance)
       socket['user'] = {
         userId,
         userAddress,
         balance,
+        privateKey: foundUser.privateKey,
       }
+
       return socket.emit('setup:login-complete', {
         response: {
           msg: 'User logged in successfully',
           userId,
           userAddress,
           balance,
+          privateKey: foundUser.privateKey,
         },
       })
     })
@@ -664,15 +721,17 @@ io.on('connection', socket => {
     if (data.password.length < 6) {
       return issue('The password must be at least 6 characters')
     }
-    const mnemonic = TronAddress.generateMnemonic()
-    const userAddress = (new TronAddress(mnemonic, 0)).master
-    const a = await tronWeb.trx.getBalance(userAddress)
+
+    // Create an account with private key and address
+    const acc = await tronWeb.createAccount()
+    const privateKey = acc.privateKey
+    const userAddress = acc.address.base58
 
     let newUser = new User({
       email: data.email,
       password: data.password,
       username: data.username,
-      mnemonic,
+      privateKey,
     })
     const userId = socket.id;
 
@@ -692,8 +751,8 @@ io.on('connection', socket => {
       userId,
       userAddress,
       balance: 0,
+      privateKey,
     }
-    console.log('Response', response)
     return socket.emit('setup:login-complete', {
       response,
     })
@@ -706,6 +765,9 @@ http.listen(port, '0.0.0.0', async () => {
 })
 
 async function start() {
+  // console.log('Getting addresses')
+  // generateAddressesFromSeed('leisure nuclear return blossom sibling orient federal pen grid arm awesome open')
+
   try {
     console.log("Setting up the game contract...")
     contractInstance = await tronWeb.contract().at(contractAddress)
@@ -750,4 +812,25 @@ function calculateWinner(cardOne, cardTwo) {
   if (cardOne == 'Paper' && cardTwo == 'Scissors') {
     return 'two'
   }
+}
+
+// Returns the private key
+async function generateAddressesFromSeed(seed) {
+  console.log('1')
+  let bip39 = require("bip39")
+  console.log('2')
+  let hdkey = require('ethereumjs-wallet/hdkey')
+  console.log('3')
+  let hdwallet = hdkey.fromMasterSeed(await bip39.mnemonicToSeed(seed))
+  let wallet_hdpath = "m/44'/60'/0'/0/0"
+  console.log('4')
+  let wallet = hdwallet.derivePath(wallet_hdpath).getWallet()
+  console.log('5')
+  let address = '0x' + wallet.getAddress().toString("hex")
+  console.log('6')
+  let privateKey = wallet.getPrivateKey()
+  let privateKey2 = wallet.getPrivateKey().toString("hex")
+  console.log('7')
+  console.log(' ---Private key--- ', privateKey, ' ---private key 2--- ', privateKey2, ' ---address--- ', address)
+  return (address, privateKey)
 }

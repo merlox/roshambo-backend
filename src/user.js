@@ -7,6 +7,7 @@ const userSchema = new mongoose.Schema({
   password: String,
   username: String,
   mnemonic: String,
+  privateKey: String,
   cards: [Map], // An array of objects containing the card type and token ID
 }, {
   timestamps: true,
