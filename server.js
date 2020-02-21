@@ -240,7 +240,7 @@ io.on('connection', socket => {
     let latestLeagueInfo = null
 
     try {
-      latestLeagueInfo = await contractInstance.getLatestLeagueInfo().call()
+      latestLeagueInfo = await contractInstance.getRemainingCardsInLeague().call()
     } catch (e) {
       console.log('No league found, sending empty game stats...')
     }
@@ -267,6 +267,7 @@ io.on('connection', socket => {
       cardsUsedPlayerOne: [],
       cardsUsedPlayerTwo: [],
     }
+    console.log('Latest league info', latestLeagueInfo)
     if (latestLeagueInfo) {
       room.leagueRocksInGame = parseInt(latestLeagueInfo[0]._hex)
       room.leaguePapersInGame = parseInt(latestLeagueInfo[1]._hex)
@@ -320,20 +321,31 @@ io.on('connection', socket => {
         console.log('Error deleting socket games from the database:', socket.id)
       }
     }
-    function emitRoundOver (result) {
-      socket.emit(`game:round:${result}`, {
+    async function emitRoundOver (result) {
+      let latestLeagueInfo = null
+      try {
+        latestLeagueInfo = await contractInstance.getRemainingCardsInLeague().call()
+      } catch (e) {
+        console.log('No league found, sending empty game stats...')
+      }
+      const msg = {
         starsPlayerOne: game.starsPlayerOne,
         starsPlayerTwo: game.starsPlayerTwo,
         playerOneActive: game.playerOneActive,
         playerTwoActive: game.playerTwoActive,
-      })
+        rocks: 0,
+        papers: 0,
+        scissors: 0,
+      }
+      if (latestLeagueInfo) {
+        msg.rocks = parseInt(latestLeagueInfo[0]._hex)
+        msg.papers = parseInt(latestLeagueInfo[1]._hex)
+        msg.scissors = parseInt(latestLeagueInfo[2]._hex)
+      }
+      console.log('League info', latestLeagueInfo)
+      socket.emit(`game:round:${result}`, msg)
       io.to(socket.id == game.playerOne ? game.playerTwo : game.playerOne)
-        .emit(`game:round:${result}`, {
-          starsPlayerOne: game.starsPlayerOne,
-          starsPlayerTwo: game.starsPlayerTwo,
-          playerOneActive: game.playerOneActive,
-          playerTwoActive: game.playerTwoActive,
-      })
+        .emit(`game:round:${result}`, msg)
       game.playerOneActive = null
       game.playerTwoActive = null
     }
@@ -392,8 +404,29 @@ io.on('connection', socket => {
       lastCardPlacedByPlayer = 'two'
     }
 
-    // DELETE the placed card from the contract forever
-    await contractInstance.deleteCard(data.sender, data.cardType).send()
+    async function deleteCard() {
+      // When a card is placed, it is deleted from the contract
+      console.log('Deleting card...')
+      let transaction
+      try {
+        tronWeb = new TronWeb({
+          fullNode: 'https://api.shasta.trongrid.io',
+          solidityNode: 'https://api.shasta.trongrid.io',
+          eventServer: 'https://api.shasta.trongrid.io',
+          privateKey: data.privateKey,
+        })
+        tronGrid = new TronGrid(tronWeb)
+        transaction = await contractInstance.deleteCard(data.cardType).send({
+          from: data.sender,
+        })
+        console.log('Card deleted successfully...')
+      } catch (e) {
+        console.log('The card deletion transaction failed...', e)
+        return issue("The card deletion transaction failed")
+      }
+    }
+
+    await deleteCard()
 
     // If both cards are placed, calculate result
     if (game.playerOneActive && game.playerTwoActive) {
@@ -446,7 +479,7 @@ io.on('connection', socket => {
     const roomId = "room" + gameRooms.length
     let latestLeagueInfo = null
     try {
-      latestLeagueInfo = await contractInstance.getLatestLeagueInfo().call()
+      latestLeagueInfo = await contractInstance.getRemainingCardsInLeague().call()
     } catch (e) {
       console.log('No league found, sending empty game stats...')
     }
