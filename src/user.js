@@ -9,6 +9,8 @@ const userSchema = new mongoose.Schema({
   mnemonic: String,
   privateKey: String,
   cards: [Map], // An array of objects containing the card type and token ID
+  board: [String], // An array of strings
+  passwordDefined: Boolean, // To only encrypt the password once
 }, {
   timestamps: true,
 })
@@ -18,9 +20,10 @@ userSchema.pre('save', async function(next) {
   const user = this
   try {
     // In case you're creating an account with just the mnemonic
-    if (user.password) {
+    if (!user.passwordDefined && user.password) {
       const hashedPassword = await bcrypt.hash(user.password, 10)
       user.password = hashedPassword
+      user.passwordDefined = true
     }
     next()
   } catch(err) {

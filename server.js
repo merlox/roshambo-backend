@@ -511,6 +511,60 @@ io.on('connection', socket => {
     socket.emit('game:join-complete', game)
     io.to(game.playerOne).emit('game:join-complete', game)
   })
+  socket.on('game:save-board', async data => {
+    const issue = msg => {
+      console.log('Called issue', msg)
+      return socket.emit('issue', { msg })
+    }
+    if (!data || data.board0 == undefined) {
+      console.log('Board not received')
+      return issue('Board not received')
+    }
+    if (!data || !data.privateKey) {
+      console.log('Private key not received')
+      return issue('Private key not received')
+    }
+    let board = []
+    for(let i = 0; i < 9; i++) {
+      board[i] = data["board"+i]
+    }
+    // Save board on your user account, find the user data
+    try {
+      let foundUser = await User.findOne({privateKey: data.privateKey})
+      foundUser.board = board
+      try {
+        await foundUser.save()
+      } catch (e) {
+        return issue('Error saving the board')
+      }
+      // foundUser2 = await User.findOne({privateKey: data.privateKey})
+      // console.log('Found user AFTER')
+      // console.log(foundUser2)
+    } catch (e) {
+      return issue('Error finding the user account')
+    }
+    socket.emit('game:save-board-complete')
+  })
+  socket.on('game:get-board', async data => {
+    let foundUser
+    const issue = msg => {
+      console.log('Called issue', msg)
+      return socket.emit('issue', { msg })
+    }
+    if (!data || !data.privateKey) {
+      console.log('Private key not received')
+      return issue('Private key not received')
+    }
+    // Save board on your user account, find the user data
+    try {
+      foundUser = await User.findOne({privateKey: data.privateKey})
+    } catch (e) {
+      return issue('Error finding the user account')
+    }
+    socket.emit('game:board', {
+      data: foundUser.board,
+    })
+  })
 
   // Returns the league data
   socket.on('tron:buy-cards', async data => {
