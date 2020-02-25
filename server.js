@@ -21,6 +21,7 @@ const TronGrid = require('trongrid')
 const TronWeb = require('tronweb')
 const http = require('http').createServer(app)
 const io = require('socket.io')(http)
+const exec = require('child_process').exec
 
 // TODO Change the fullhost to mainnet: https://api.trongrid.io
 // Instead of testnet: https://api.shasta.trongrid.io
@@ -84,8 +85,16 @@ app.use(session({
 app.use(bodyParser.json())
 app.use(bodyParser.urlencoded({extended: true}))
 
+
+function puts(error, stdout, stderr) { sys.puts(stdout) }
 app.post('/webhook', (req, res) => {
-  console.log('-------------------------WEBHOOK CALLED-------------------------')
+  console.log('Running git pull and pm2 restart all')
+  exec("git pull && pm2 restart all", (err, stdout, stderr) => {
+    if (err) {
+      console.log('Error git pulling:', err)
+    }
+    console.log('Stdout', stdout)
+  });
 })
 
 let socketIds = []
