@@ -84,7 +84,7 @@ app.use(session({
 app.use(bodyParser.json())
 app.use(bodyParser.urlencoded({extended: true}))
 
-app.get('/webhook', (req, res) => {
+app.post('/webhook', (req, res) => {
   console.log('-------------------------WEBHOOK CALLED-------------------------')
 })
 
