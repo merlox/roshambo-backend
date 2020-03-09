@@ -31,6 +31,12 @@ const gameSchema = new mongoose.Schema({
   playerTwoActive: String,
   isPrivateGame: Boolean,
   qrData: String, // for private games only
+  boardOne: [String],
+  boardTwo: [String],
+  cardsUsedPlayerOne: Number,
+  cardsUsedPlayerTwo: Number,
+  totalCardsPlayerOne: Number,
+  totalCardsPlayerTwo: Number,
 }, {
   timestamps: true,
 })

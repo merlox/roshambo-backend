@@ -85,8 +85,7 @@ app.use(session({
 app.use(bodyParser.json())
 app.use(bodyParser.urlencoded({extended: true}))
 
-
-function puts(error, stdout, stderr) { sys.puts(stdout) }
+// Gets called when a git push is detected automatically and updates the server
 app.post('/webhook', (req, res) => {
   console.log('Running git pull and pm2 restart all')
   exec("git pull && pm2 restart all", (err, stdout, stderr) => {
@@ -176,10 +175,11 @@ io.on('connection', socket => {
       playerTwoActive: null,
       starsPlayerOne: 3,
       starsPlayerTwo: 3,
-      cardsUsedPlayerOne: [],
-      cardsUsedPlayerTwo: [],
+      cardsUsedPlayerOne: 0,
+      cardsUsedPlayerTwo: 0,
+      totalCardsPlayerOne: data.totalCardsPlayerOne,
+      totalCardsPlayerTwo: null,
     }
-
     const gameExisting = socketGames.map(game => game.playerOne).find(playerOne => playerOne == socket.id)
     if (gameExisting) {
       return socket.emit('issue', {
@@ -210,7 +210,6 @@ io.on('connection', socket => {
       console.log('Called issue', msg)
       return socket.emit('issue', { msg })
     }
-
     // Setup the user id on my game
     let game
     if (!data.playerOne || data.playerOne.length == 0) {
@@ -231,7 +230,6 @@ io.on('connection', socket => {
     if (!data.moveTimer || data.moveTimer.length == 0) {
       return issue('The game move timer is missing')
     }
-
     try {
       game = await Game.findOne({playerOne: data.playerOne})
       game.playerTwo = data.playerTwo
@@ -250,7 +248,6 @@ io.on('connection', socket => {
     }
     const roomId = "room" + gameRooms.length
     let latestLeagueInfo = null
-
     try {
       latestLeagueInfo = await contractInstance.getRemainingCardsInLeague().call()
     } catch (e) {
@@ -276,8 +273,10 @@ io.on('connection', socket => {
       leagueRocksInGame: 0,
       leaguePapersInGame: 0,
       leagueScissorsInGame: 0,
-      cardsUsedPlayerOne: [],
-      cardsUsedPlayerTwo: [],
+      cardsUsedPlayerOne: 0,
+      cardsUsedPlayerTwo: 0,
+      totalCardsPlayerOne: game.totalCardsPlayerOne,
+      totalCardsPlayerTwo: data.totalCardsPlayerTwo,
     }
     console.log('Latest league info', latestLeagueInfo)
     if (latestLeagueInfo) {
@@ -312,6 +311,9 @@ io.on('connection', socket => {
         return send('game:finish:winner-player-two')
       }
     }, timer) // Extra 2 for animation transitions
+
+    game.cardsUsedPlayerOne++
+    game.cardsUsedPlayerTwo++
 
     // To delete a game room from the active ones in the rooms and socketGames
     // arrays while marking the database model as completed
@@ -370,6 +372,9 @@ io.on('connection', socket => {
       io.to(isPlayerOne ? game.playerTwo : game.playerOne).emit(endpoint)
     }
     function checkFinishGame() {
+      // When you join your game, you should add the number of cards you have
+      // check if that limit is reached and increase the counter on placement
+
       // If stars 0 for any player, emit victory
       if (game.starsPlayerOne == 0) {
         console.log("GAME OVER Player 2 wins for stars")
@@ -384,9 +389,12 @@ io.on('connection', socket => {
         return true
       }
 
-      // If the rounds are over OR the timeout is reached, emit the winner
-      // this includes the 9 max rounds for All rounds mode
-      if (parseInt(game.currentRound) >= parseInt(game.rounds)) {
+      // If the rounds are over OR the timeout is reached OR a player has used all
+      // of his selected cards, emit the winner this includes the 9 max rounds for
+      // All rounds mode
+      if (parseInt(game.currentRound) >= parseInt(game.rounds)
+        || game.cardsUsedPlayerOne >= game.totalCardsPlayerOne
+        || game.cardsUsedPlayerTwo >= game.totalCardsPlayerTwo) {
         console.log("All rounds over, emiting winner:")
         if (game.starsPlayerOne > game.starsPlayerTwo) {
           console.log("GAME OVER Winner player one for rounds over")
@@ -547,6 +555,7 @@ io.on('connection', socket => {
       try {
         await foundUser.save()
       } catch (e) {
+        console.log('Saving board error', e)
         return issue('Error saving the board')
       }
       // foundUser2 = await User.findOne({privateKey: data.privateKey})
