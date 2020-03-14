@@ -32,9 +32,9 @@ let tronWeb = new TronWeb({
   privateKey: TRON_PRIVATE_KEY,
 })
 let tronGrid = new TronGrid(tronWeb)
-
+// http://testhttpapi.tronex.io/
 // Addresses
-const myAddress = "TNiVeT2TUDaKX1cjH6ejsj79aR2m1FUwJ8"
+const myAddress = "TEUsDTUwML38AKxBfenEMQYog5Xd6a6aAD"
 const contractAddress = GAME_CONTRACT
 tronWeb.defaultAddress = {
   hex: tronWeb.address.toHex(myAddress),
@@ -297,6 +297,7 @@ io.on('connection', socket => {
   })
   socket.on('game:card-placed', async data => {
     console.log('Card placed called')
+
     let lastCardPlacedByPlayer
     const game = gameRooms.find(room => room.roomId == data.roomId)
     if (!game) return issue('Game not found')
@@ -311,9 +312,6 @@ io.on('connection', socket => {
         return send('game:finish:winner-player-two')
       }
     }, timer) // Extra 2 for animation transitions
-
-    game.cardsUsedPlayerOne++
-    game.cardsUsedPlayerTwo++
 
     // To delete a game room from the active ones in the rooms and socketGames
     // arrays while marking the database model as completed
@@ -392,6 +390,10 @@ io.on('connection', socket => {
       // If the rounds are over OR the timeout is reached OR a player has used all
       // of his selected cards, emit the winner this includes the 9 max rounds for
       // All rounds mode
+      console.log('Cards used player 1 ', game.cardsUsedPlayerOne)
+      console.log('Cards used player 2 ', game.cardsUsedPlayerTwo)
+      console.log('total cards player 1 ', game.totalCardsPlayerOne)
+      console.log('total cards player 2 ', game.totalCardsPlayerTwo)
       if (parseInt(game.currentRound) >= parseInt(game.rounds)
         || game.cardsUsedPlayerOne >= game.totalCardsPlayerOne
         || game.cardsUsedPlayerTwo >= game.totalCardsPlayerTwo) {
@@ -450,6 +452,8 @@ io.on('connection', socket => {
 
     // If both cards are placed, calculate result
     if (game.playerOneActive && game.playerTwoActive) {
+      game.cardsUsedPlayerOne++
+      game.cardsUsedPlayerTwo++
       game.currentRound++
       const winner = calculateWinner(game.playerOneActive, game.playerTwoActive)
       let winnerText = ''
@@ -558,9 +562,6 @@ io.on('connection', socket => {
         console.log('Saving board error', e)
         return issue('Error saving the board')
       }
-      // foundUser2 = await User.findOne({privateKey: data.privateKey})
-      // console.log('Found user AFTER')
-      // console.log(foundUser2)
     } catch (e) {
       return issue('Error finding the user account')
     }
@@ -621,30 +622,33 @@ io.on('connection', socket => {
   // Gets your cards with id and all
   socket.on('tron:get-my-cards', async data => {
     let cards = []
-    const issue = msg => {
-      return socket.emit('issue', { msg })
-    }
-    console.log('Data received', data)
-    if (!data.privateKey || data.privateKey.length == 0) {
-      console.log('Private key not received')
-      return issue('Private key not received')
-    }
-    tronWeb = new TronWeb({
-      fullNode: 'https://api.shasta.trongrid.io',
-      solidityNode: 'https://api.shasta.trongrid.io',
-      eventServer: 'https://api.shasta.trongrid.io',
-      privateKey: data.privateKey,
-    })
-    tronGrid = new TronGrid(tronWeb)
-    contractInstance = await tronWeb.contract().at(contractAddress)
-    try {
-      cards = await contractInstance.getMyCards().call({
-        from: data.account,
-      })
-    } catch (e) {
-      console.log('Error getting your cards')
-      return issue("Error getting your cards")
-    }
+    // const issue = msg => {
+    //   return socket.emit('issue', { msg })
+    // }
+    // console.log('Data received', data)
+    // if (!data.privateKey || data.privateKey.length == 0) {
+    //   console.log('Private key not received')
+    //   return issue('Private key not received')
+    // }
+    // tronWeb = new TronWeb({
+    //   fullNode: 'https://api.shasta.trongrid.io',
+    //   solidityNode: 'https://api.shasta.trongrid.io',
+    //   eventServer: 'https://api.shasta.trongrid.io',
+    //   privateKey: data.privateKey,
+    // })
+    // tronGrid = new TronGrid(tronWeb)
+    // contractInstance = await tronWeb.contract().at(contractAddress)
+    // try {
+    //   cards = await contractInstance.getMyCards().call({
+    //     from: data.account,
+    //   })
+    // } catch (e) {
+    //   console.log('Error getting your cards')
+    //   return issue("Error getting your cards")
+    // }
+    // TODO This is temporary
+    cards = [[1, 2, 3, 4, 5], [1, 2, 3, 4, 5], [1, 2, 3, 4, 5]]
+
     socket.emit('tron:get-my-cards', {
       data: cards, // Rocks then papers then scissors
     })
@@ -738,7 +742,9 @@ io.on('connection', socket => {
         responseMsg = "New user created successfully"
       }
       const userAddress = tronWeb.address.fromPrivateKey(data.privateKey)
+      console.log('USER ADDRESS', userAddress)
       let balance = (await tronGrid.account.get(userAddress))
+      console.log('BALANCE', balance)
       if (!balance.data || balance.data.length == 0) {
         balance = 0
       } else {
@@ -764,6 +770,9 @@ io.on('connection', socket => {
       return issue("Error processing the request on the server")
     }
   })
+  // data = {
+  //   email, password, 
+  // }
   socket.on('setup:login', async data => {
     const issue = msg => {
       return socket.emit('issue', { msg })
@@ -809,6 +818,10 @@ io.on('connection', socket => {
       })
     })
   })
+  // Data is:
+  // {
+  //   email, password, username
+  // }
   socket.on('setup:register', async data => {
     const issue = msg => {
       console.log('Called issue', msg)
