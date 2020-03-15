@@ -1,17 +1,12 @@
 require('dotenv-safe').config()
 
-const { FORGOT_PASSWORD_DOMAIN, TRON_PRIVATE_KEY, GAME_CONTRACT } = process.env
+const { TRON_PRIVATE_KEY, GAME_CONTRACT, TRON_ADDRESS } = process.env
 const express = require('express')
 const bodyParser = require('body-parser')
-const limiter = require('express-rate-limit')
-const path = require('path')
 const app = express()
 const User = require('./src/user')
-const ForgotPasswordToken = require('./src/forgotPasswordToken')
 const Game = require('./src/game')
-const bcrypt = require('bcrypt')
 const yargs = require('yargs')
-const sendEmail = require('./src/sendEmail')
 const mongoose = require('mongoose')
 const session = require('express-session')
 const MongoStore = require('connect-mongo')(session)
@@ -25,20 +20,12 @@ const exec = require('child_process').exec
 
 // TODO Change the fullhost to mainnet: https://api.trongrid.io
 // Instead of testnet: https://api.shasta.trongrid.io
-let tronWeb = new TronWeb({
-  fullNode: 'https://api.shasta.trongrid.io',
-  solidityNode: 'https://api.shasta.trongrid.io',
-  eventServer: 'https://api.shasta.trongrid.io',
-  privateKey: TRON_PRIVATE_KEY,
-})
-let tronGrid = new TronGrid(tronWeb)
-// http://testhttpapi.tronex.io/
+let tronGrid = setupTronGrid(TRON_PRIVATE_KEY)
 // Addresses
-const myAddress = "TEUsDTUwML38AKxBfenEMQYog5Xd6a6aAD"
 const contractAddress = GAME_CONTRACT
 tronWeb.defaultAddress = {
-  hex: tronWeb.address.toHex(myAddress),
-  base58: myAddress
+  hex: tronWeb.address.toHex(TRON_ADDRESS),
+  base58: TRON_ADDRESS
 }
 let contractInstance
 
@@ -127,6 +114,17 @@ async function deleteGame(socket) {
   io.emit('game:get-games', {
     data: socketGames,
   })
+}
+
+// Returns the instantiated trongrid
+function setupTronGrid(privateKey) {
+  const tronWeb = new TronWeb({
+    fullNode: 'https://api.trongrid.io',
+    solidityNode: 'https://api.trongrid.io',
+    eventServer: 'https://api.trongrid.io',
+    privateKey,
+  })
+  return new TronGrid(tronWeb)
 }
 
 io.on('connection', socket => {
@@ -440,13 +438,7 @@ io.on('connection', socket => {
       console.log('Deleting card...')
       let transaction
       try {
-        tronWeb = new TronWeb({
-          fullNode: 'https://api.shasta.trongrid.io',
-          solidityNode: 'https://api.shasta.trongrid.io',
-          eventServer: 'https://api.shasta.trongrid.io',
-          privateKey: data.privateKey,
-        })
-        tronGrid = new TronGrid(tronWeb)
+        tronGrid = setupTronGrid(data.privateKey)
         transaction = await contractInstance.deleteCard(data.cardType).send({
           from: data.sender,
         })
@@ -616,13 +608,7 @@ io.on('connection', socket => {
     }
     let transaction
     try {
-      tronWeb = new TronWeb({
-        fullNode: 'https://api.shasta.trongrid.io',
-        solidityNode: 'https://api.shasta.trongrid.io',
-        eventServer: 'https://api.shasta.trongrid.io',
-        privateKey: data.privateKey,
-      })
-      tronGrid = new TronGrid(tronWeb)
+      tronGrid = setupTronGrid(data.privateKey)
       transaction = await contractInstance.buyCards(data.cardsToBuy).send({
         callValue: tronWeb.toSun(10) * data.cardsToBuy,
         from: data.account,
@@ -668,63 +654,7 @@ io.on('connection', socket => {
       data: cards, // Rocks then papers then scissors
     })
   })
-
-  socket.on('setup:login-with-crypto', async data => {
-    const issue = msg => {
-      return socket.emit('issue', { msg })
-    }
-    let responseMsg
-    try {
-      if (!data.mnemonic || data.mnemonic.length == 0) {
-        return issue("Mnemonic not received")
-      }
-      if (data.mnemonic.split(' ').length != 12) {
-        return issue("The mnemonic received must be 12 words")
-      }
-      data.mnemonic = data.mnemonic.trim()
-      let foundUser = await User.findOne({mnemonic: data.mnemonic})
-      let userId
-      // Existing account, login
-      if (foundUser) {
-        // Log in for that found user
-        userId = socket.id;
-        responseMsg = "User logged in successfully"
-      } else {
-        // New account, register
-        let newUser = new User({
-          mnemonic: data.mnemonic,
-        })
-        try {
-          await newUser.save()
-        } catch (e) {
-          console.log("Error saving new mnemonic user", e)
-          return issue("Error saving your new account")
-        }
-        userId = socket.id;
-        responseMsg = "New user created successfully"
-      }
-      const userAddress = (new TronAddress(data.mnemonic, 0)).master
-      console.log('User address', userAddress)
-      const balance = (await tronGrid.account.get(userAddress)).data[0].balance
-      console.log('Balance', balance)
-      socket['user'] = {
-        userId,
-        userAddress,
-        balance,
-      }
-      return socket.emit('setup:login-complete', {
-        response: {
-          msg: responseMsg,
-          userId,
-          userAddress,
-          balance,
-        },
-      })
-    } catch (e) {
-      console.log("Error processing the request", e)
-      return issue("Error processing the request on the server")
-    }
-  })
+  
   socket.on('setup:login-with-crypto-private-key', async data => {
     const issue = msg => {
       return socket.emit('issue', { msg })
