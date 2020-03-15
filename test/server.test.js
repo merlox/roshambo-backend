@@ -1,5 +1,10 @@
+require('dotenv-safe').config()
+const { GAME_CONTRACT, TRON_PRIVATE_KEY } = process.env
+
 const expect = require('chai').expect
 const io = require('socket.io-client')
+const TronGrid = require('trongrid')
+const TronWeb = require('tronweb')
 const MongoClient = require('mongodb').MongoClient
 const mongoUrl = 'mongodb://localhost:27017/test' // Using the test environment
 let socket = io('http://localhost')
@@ -88,7 +93,7 @@ function socketAsync () {
     })
 }
 
-async function createAndJoin() {
+async function createAndJoin(cardsPlayer1, cardsPlayer2) {
     let socket1 = await socketAsync()
     let socket2 = await socketAsync()
     let game1 = {
@@ -96,7 +101,7 @@ async function createAndJoin() {
         gameType: 'Rounds',
         rounds: 9,
         moveTimer: 99,
-        totalCardsPlayerOne: 5,
+        totalCardsPlayerOne: cardsPlayer1 || 9,
     }
     let game2 = {
         playerOne: socket1.id,
@@ -105,7 +110,7 @@ async function createAndJoin() {
         gameType: game1.gameType,
         rounds: game1.rounds,
         moveTimer: game1.moveTimer,
-        totalCardsPlayerTwo: 7,
+        totalCardsPlayerTwo: cardsPlayer2 || 9,
     }
     let user1 = {
         email: 'example@gmail.com',
@@ -145,8 +150,35 @@ async function createAndJoin() {
     } catch (e) {
         expect(e).to.be.null
     }
-    return {socket1, socket2}
+    return { socket1, socket2 }
 }
+
+// Emits and events and waits for another
+function emitAndWait(socket, emitted, dataToEmit, waitName) {
+    return new Promise((resolve, reject) => {
+        socket.once(waitName, res => {
+            resolve(res)
+        })
+        socket.once('issue', res => {
+            reject(res)
+        })
+        socket.emit(emitted, dataToEmit)
+    })
+}
+
+function placeCard(socket, data) {
+    return new Promise((resolve, reject) => {
+        socket.emit('game:card-placed', data)
+        socket.once('game:card-placement-done', async msg => {
+            resolve(msg)
+        })
+        socket.once('issue', async msg => {
+            console.log('Issue 2', msg)
+            reject(msg)
+        })
+    })
+}
+
 
 describe('Server testing', async () => {
     before(async () => {
@@ -306,10 +338,254 @@ describe('Server testing', async () => {
         })
         it('Should place a card successfully', async () => {
             const {socket1, socket2} = await createAndJoin()
+            const data = {
+                roomId: 'room0',
+                cardType: 'Rock',
+                privateKey: '2D71177215865124B97226580963C14AB6F53D538898648C65A831A7C3ABCF4F',
+                sender: 'TACgdnYe13EKuM8x4gk7kmd3Wn7wVDWVfF',
+            }
+            socket1.emit('game:card-placed', data)
+            socket1.once('issue', e => {
+                expect(e).to.be.null
+            })
         })
-        it('Should delete the card placed successfully')
-        it('Should end the game when all cards are used')
-        it('Should make a player lose after using all cards')
-        it('Should make a player win after the other uses all cards')
+        it('Should place both cards and win player 1 successfully', async () => {
+            const {socket1, socket2} = await createAndJoin()
+            const data1 = {
+                roomId: 'room0',
+                cardType: 'Scissors',
+                privateKey: '2D71177215865124B97226580963C14AB6F53D538898648C65A831A7C3ABCF4F',
+                sender: 'TACgdnYe13EKuM8x4gk7kmd3Wn7wVDWVfF',
+            }
+            const data2 = {
+                roomId: 'room0',
+                cardType: 'Paper',
+                privateKey: '2D71177215865124B97226580963C14AB6F53D538898648C65A831A7C3ABCF4F',
+                sender: 'TACgdnYe13EKuM8x4gk7kmd3Wn7wVDWVfF',
+            }
+            socket1.emit('game:card-placed', data1)
+            socket2.emit('game:card-placed', data2)
+            socket1.once('issue', e => {
+                expect(e).to.be.null
+            })
+            socket2.once('issue', e => {
+                expect(e).to.be.null
+            })
+            socket1.once('game:round:draw', async msg => {
+                console.log('Message', msg)
+            })
+            socket1.once('game:round:winner-one', async msg => {
+                console.log('Message', msg)
+            })
+            socket1.once('game:round:winner-two', async msg => {
+                console.log('Message', msg)
+            })
+
+            // socket2.once('game:round:draw', async msg => {
+            //     console.log('Message 2', msg)
+            // })
+            // socket2.once('game:round:winner-one', async msg => {
+            //     console.log('Message 2', msg)
+            // })
+            // socket2.once('game:round:winner-two', async msg => {
+            //     console.log('Message 2', msg)
+            // })
+            await placeCard(socket2, data2)
+            // game:round:draw
+            // game:round:winner-one
+            // game:round:winner-two
+        })
+        // TODO finish the expect() event at the end
+        it('Should delete the card placed successfully', async () => {
+            // 1. Variables setup
+            const {socket1, socket2} = await createAndJoin()
+            const privateKey = '2D71177215865124B97226580963C14AB6F53D538898648C65A831A7C3ABCF4F'
+            const sender = 'TACgdnYe13EKuM8x4gk7kmd3Wn7wVDWVfF'
+            const data1 = {
+                roomId: 'room0',
+                cardType: 'Scissors',
+                privateKey,
+                sender,
+            }
+            const data2 = {
+                roomId: 'room0',
+                cardType: 'Paper',
+                privateKey,
+                sender,
+            }
+
+            // 2. Contract and trongrid setup
+            const tronWeb = new TronWeb({
+                fullNode: 'https://api.shasta.trongrid.io',
+                solidityNode: 'https://api.shasta.trongrid.io',
+                eventServer: 'https://api.shasta.trongrid.io',
+                privateKey,
+            })
+            const tronGrid = new TronGrid(tronWeb)
+            tronWeb.defaultAddress = {
+                hex: tronWeb.address.toHex(sender),
+                base58: sender
+            }
+            const contractInstance = await tronWeb.contract().at(GAME_CONTRACT)
+
+            // 3. Getting initial cards
+            let initialCards = []
+            let finalCards = []
+            try {
+              initialCards = await contractInstance.getMyCards().call({
+                from: sender,
+              })
+            } catch (e) {
+              console.log('Error getting your cards')
+              expect(e).to.be.null
+            }
+
+            // 4. Executing the card placement
+            try {
+                await emitAndWait(socket1, 'game:card-placed', data1, 'game:card-placement-done')
+            } catch (e) {
+                console.log('Error', e)
+                expect(e).to.be.null
+            }
+
+            // 5. Check if the card has been deleted
+            try {
+                finalCards = await contractInstance.getMyCards().call({
+                    from: sender,
+                })
+            } catch (e) {
+                console.log('Error getting your cards')
+                expect(e).to.be.null
+            }
+
+            console.log('Initial cards', initialCards, 'final cards', finalCards)
+            // 6. Final expect
+            // Expect
+
+            // INFO This is the event that will be executed, check if the card is being deleted after
+            // transaction = await contractInstance.deleteCard(data.cardType).send({
+            //     from: data.sender,
+            // })
+        })
+
+        it('Should end a game successfully as a draw event after all 9 rounds', async () => {
+            const {socket1, socket2} = await createAndJoin()
+            const data1 = {
+                roomId: 'room0',
+                cardType: 'Scissors',
+                privateKey,
+                sender,
+            }
+            const data2 = {
+                roomId: 'room0',
+                cardType: 'Scissors',
+                privateKey,
+                sender,
+            }
+
+            // Setup the game finishing events
+            // This shouldn't be called
+            socket1.once('game:finish:winner-player-one', () => {
+                expect(true).to.be.false
+            })
+            // This shouldn't be called
+            socket1.once('game:finish:winner-player-two', () => {
+                expect(true).to.be.false
+            })
+            // This should be called after 9 rounds not sooner
+            socket1.once('game:finish:draw', () => {
+                console.log('Called the draw event')
+                expect(true).to.be.true
+            })
+
+            // Set the 18 card placement among both players
+            for (let i = 0; i < 18; i++) {
+                if (i % 2 == 0) {
+                    console.log('Round', i/2 + 1)
+                    await placeCard(socket1, data1)
+                } else {
+                    await placeCard(socket2, data2)
+                }
+            }
+        })
+        // The strategy is to emit all draw events until a player uses all cards 8 vs 9 cards
+        it('Should make player one lose after using all cards', () => {
+            const {socket1, socket2} = await createAndJoin(5)
+            const data1 = {
+                roomId: 'room0',
+                cardType: 'Scissors',
+                privateKey,
+                sender,
+            }
+            const data2 = {
+                roomId: 'room0',
+                cardType: 'Scissors',
+                privateKey,
+                sender,
+            }
+
+            // Setup the game finishing events
+            // This should be called
+            socket1.once('game:finish:winner-player-one', () => {
+                expect(true).to.be.true
+            })
+            // This shouldn't be called
+            socket1.once('game:finish:winner-player-two', () => {
+                expect(true).to.be.false
+            })
+            // This shouldn't be called
+            socket1.once('game:finish:draw', () => {
+                expect(true).to.be.false
+            })
+
+            // Set the 18 card placement among both players
+            for (let i = 0; i < 18; i++) {
+                if (i % 2 == 0) {
+                    console.log('Round', i/2 + 1)
+                    await placeCard(socket1, data1)
+                } else {
+                    await placeCard(socket2, data2)
+                }
+            }
+        })
+        it('Should make a player win after the other uses all his cards', () => {
+            const {socket1, socket2} = await createAndJoin(9, 5)
+            const data1 = {
+                roomId: 'room0',
+                cardType: 'Scissors',
+                privateKey,
+                sender,
+            }
+            const data2 = {
+                roomId: 'room0',
+                cardType: 'Scissors',
+                privateKey,
+                sender,
+            }
+
+            // Setup the game finishing events
+            // This shouldn't be called
+            socket1.once('game:finish:winner-player-one', () => {
+                expect(true).to.be.false
+            })
+            // This should be called
+            socket1.once('game:finish:winner-player-two', () => {
+                expect(true).to.be.true
+            })
+            // This shouldn't be called
+            socket1.once('game:finish:draw', () => {
+                expect(true).to.be.false
+            })
+
+            // Set the 18 card placement among both players
+            for (let i = 0; i < 18; i++) {
+                if (i % 2 == 0) {
+                    console.log('Round', i/2 + 1)
+                    await placeCard(socket1, data1)
+                } else {
+                    await placeCard(socket2, data2)
+                }
+            }
+        })
     })
 })

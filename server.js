@@ -305,6 +305,9 @@ io.on('connection', socket => {
   socket.on('game:delete', async () => {
     deleteGame(socket)
   })
+  // data = {
+  //   roomId, cardType, privateKey, sender
+  // }
   socket.on('game:card-placed', async data => {
     console.log('Card placed called')
 
@@ -400,10 +403,6 @@ io.on('connection', socket => {
       // If the rounds are over OR the timeout is reached OR a player has used all
       // of his selected cards, emit the winner this includes the 9 max rounds for
       // All rounds mode
-      console.log('Cards used player 1 ', game.cardsUsedPlayerOne)
-      console.log('Cards used player 2 ', game.cardsUsedPlayerTwo)
-      console.log('total cards player 1 ', game.totalCardsPlayerOne)
-      console.log('total cards player 2 ', game.totalCardsPlayerTwo)
       if (parseInt(game.currentRound) >= parseInt(game.rounds)
         || game.cardsUsedPlayerOne >= game.totalCardsPlayerOne
         || game.cardsUsedPlayerTwo >= game.totalCardsPlayerTwo) {
@@ -487,6 +486,9 @@ io.on('connection', socket => {
           break
       }
 
+      socket.emit('game:card-placement-done', {
+        msg: 'The card has been placed successfully'
+      })
       const isThereAWinner = checkFinishGame()
       if (isThereAWinner) return
       else return emitRoundOver(winnerText)
