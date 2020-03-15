@@ -242,7 +242,7 @@ describe('Server testing', async () => {
         })
     })
 
-    describe('Game setup', async () => {
+    describe('Game setup and purchasing', async () => {
         beforeEach(async () => {
             await db.dropDatabase()
         })
@@ -329,6 +329,31 @@ describe('Server testing', async () => {
             } catch (e) {
                 expect(e).to.be.null
             }
+        })
+
+        it('Should buy cards successfully given enough TRX', async () => {
+            const socket1 = await socketAsync()
+            const privateKey = '2D71177215865124B97226580963C14AB6F53D538898648C65A831A7C3ABCF4F'
+            const account = 'TACgdnYe13EKuM8x4gk7kmd3Wn7wVDWVfF'
+            const user1 = {
+                email: 'example@gmail.com',
+                password: 'example',
+                username: 'example',
+            }
+            const data1 = {
+                cardsToBuy: 10,
+                account,
+                privateKey,
+            }
+            try {
+                await registerUser(user1, socket1)
+            } catch (e) {
+                throw new Error(e)
+            }
+            socket1.emit('tron:buy-cards', data1)
+            socket1.once('tron:buy-cards-complete', () => {
+                expect(true).to.be.true
+            })
         })
     })
 
@@ -460,7 +485,7 @@ describe('Server testing', async () => {
 
             console.log('Initial cards', initialCards, 'final cards', finalCards)
             // 6. Final expect
-            // Expect
+            expect(initialCards.length).to.eq(finalCards.length + 1)
 
             // INFO This is the event that will be executed, check if the card is being deleted after
             // transaction = await contractInstance.deleteCard(data.cardType).send({

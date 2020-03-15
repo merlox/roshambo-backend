@@ -601,6 +601,9 @@ io.on('connection', socket => {
   })
 
   // Returns the league data
+  // data = {
+  //   cardsToBuy, account, privateKey
+  // }
   socket.on('tron:buy-cards', async data => {
     const issue = msg => {
       return socket.emit('issue', { msg })
