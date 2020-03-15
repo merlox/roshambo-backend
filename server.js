@@ -52,6 +52,7 @@ if(!argv.port) {
     process.exit(0)
 }
 const port = argv.port
+const mongoUrl = process.env.TEST_ENV ? 'mongodb://localhost:27017/test' : 'mongodb://localhost:27017/roshambo'
 
 // This is to simplify everything but you should set it from the terminal
 // required to encrypt user accounts
@@ -60,7 +61,7 @@ mongoose.set('useNewUrlParser', true)
 mongoose.set('useFindAndModify', false)
 mongoose.set('useCreateIndex', true)
 mongoose.set('useUnifiedTopology', true)
-mongoose.connect('mongodb://localhost:27017/roshambo', {
+mongoose.connect(mongoUrl, {
 	useNewUrlParser: true,
 	useCreateIndex: true,
 })
@@ -140,6 +141,12 @@ io.on('connection', socket => {
     console.log('User disconnected', socket.id)
     deleteGame(socket)
   })
+
+  // It will be created for the logged in socket.id
+  // let game = {
+  //  gameName, gameType -> ‘Rounds’ or ‘All cards’, rounds, moveTimer, totalCardsPlayerOne
+  //  optional qrData
+  // }
   socket.on('game:create', async data => {
     const issue = msg => {
       return socket.emit('issue', { msg })
@@ -205,6 +212,9 @@ io.on('connection', socket => {
       data: onlyPublicGames,
     })
   })
+  // let game = {
+  //   playerOne, playerTwo, gameName, gameType, rounds, moveTimer, totalCardsPlayerTwo
+  // }
   socket.on('game:join', async data => {
     const issue = msg => {
       console.log('Called issue', msg)
@@ -772,6 +782,13 @@ io.on('connection', socket => {
   })
   // data = {
   //   email, password, 
+  // }
+  // returns response = {
+  //   msg,
+  //   userId, // The socket id of the user
+  //   userAddress,
+  //   balance,
+  //   privateKey
   // }
   socket.on('setup:login', async data => {
     const issue = msg => {

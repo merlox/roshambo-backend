@@ -3,8 +3,8 @@ const bcrypt = require('bcrypt')
 
 const gameSchema = new mongoose.Schema({
   roomId: String,
-  playerOne: String,
-  playerTwo: String,
+  playerOne: String, // The socket.id of the first player
+  playerTwo: String, // The socket.id of the second player
   gameName: String,
   gameType: String,
   rounds: String,
