@@ -14,25 +14,38 @@ let newUser = {
 }
 
 function registerUser() {
-    socket.emit('setup:register', newUser)
-    return new Promise((resolve, reject) => {
+    return new Promise(async (resolve, reject) => {
         // Check if user exists already
         const foundUser = await db.collection('users').findOne({ email: newUser.email })
         // Delete before adding it
         if (foundUser) {
             await db.collection('users').deleteOne({ email: newUser.email })
         }
-        socket.on('setup:login-complete', async e => {
+        socket.emit('setup:register', newUser)
+        socket.once('setup:login-complete', async () => {
             try {
                 const user = await db.collection('users').findOne({ email: newUser.email })
                 expect(user).to.not.be.null
+                resolve()
             } catch (e) {
                 reject(e)
             }
+        })
+        socket.once('issue', e => {
+            reject(e.msg)
+        })
+    })
+}
+
+function loginUser(user) {
+    return new Promise(async (resolve, reject) => {
+        // Check if user exists already
+        socket.emit('setup:login', user)
+        socket.once('setup:login-complete', async res => {
+            expect(res.response.msg).to.eq('User logged in successfully')
             resolve()
         })
-        socket.on('issue', e => {
-            console.log('Issue', e)
+        socket.once('issue', e => {
             reject(e.msg)
         })
     })
@@ -51,7 +64,6 @@ describe('Server testing', async () => {
         })
         await client.connect()
         db = client.db('roshambo')
-        client.close()
     })
 
     describe('User registration and login', async () => {
@@ -64,21 +76,30 @@ describe('Server testing', async () => {
             await db.collection('users').deleteOne({ email: newUser.email })
         })
         it('Should login a user properly', async () => {
-            // let user = {
-            //     email: 'example@gmail.com',
-            //     password: 'example',
-            // }
-            // socket.emit('setup:login', user)
-            // socket.on('setup:login-complete', async res => {
-            //     console.log('Response', res.response)
-            //     // Delete the example for future tests
-            //     expect(res.response.msg).to.eq('User logged in successfully')
-            // })
-            // socket.on('issue', e => {
-            //     console.log('Issue', e)
-            // })
+            try {
+                await registerUser()
+            } catch (e) {
+                throw new Error(e)
+            }
+            let user = {
+                email: 'example@gmail.com',
+                password: 'example',
+            }
+            await loginUser(user)
         })
-        it('Should throw an error when login with a non-existing user')
+        it('Should throw an error when login with a non-existing user', async () => {
+            let user = {
+                email: 'aaaaaaaaaaaaaaaaaaaaaaa@gmail.com',
+                password: 'fake',
+            }
+            try {
+                await loginUser(user)
+                // Should not continue
+                expect(true).to.be.false
+            } catch (e) {
+                expect(e).to.eq('User not found')
+            }
+        })
     })
 
     describe('Game setup', async () => {
