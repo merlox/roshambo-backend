@@ -20,13 +20,10 @@ const exec = require('child_process').exec
 
 // TODO Change the fullhost to mainnet: https://api.trongrid.io
 // Instead of testnet: https://api.shasta.trongrid.io
-let tronGrid = setupTronGrid(TRON_PRIVATE_KEY)
+let tronWeb
+let tronGrid
 // Addresses
 const contractAddress = GAME_CONTRACT
-tronWeb.defaultAddress = {
-  hex: tronWeb.address.toHex(TRON_ADDRESS),
-  base58: TRON_ADDRESS
-}
 let contractInstance
 
 const argv = yargs.option('port', {
@@ -118,13 +115,18 @@ async function deleteGame(socket) {
 
 // Returns the instantiated trongrid
 function setupTronGrid(privateKey) {
-  const tronWeb = new TronWeb({
+  const web = new TronWeb({
     fullNode: 'https://api.trongrid.io',
     solidityNode: 'https://api.trongrid.io',
     eventServer: 'https://api.trongrid.io',
     privateKey,
   })
-  return new TronGrid(tronWeb)
+  web.defaultAddress = {
+    hex: web.address.toHex(TRON_ADDRESS),
+    base58: TRON_ADDRESS
+  }
+  const grid = new TronGrid(web)
+  return { web, grid }
 }
 
 io.on('connection', socket => {
@@ -836,8 +838,9 @@ http.listen(port, '0.0.0.0', async () => {
 })
 
 async function start() {
-  // console.log('Getting addresses')
-  // generateAddressesFromSeed('leisure nuclear return blossom sibling orient federal pen grid arm awesome open')
+  let { web, grid } = setupTronGrid(TRON_PRIVATE_KEY)
+  tronWeb = web
+  tronGrid = grid
 
   try {
     console.log("Setting up the game contract...")

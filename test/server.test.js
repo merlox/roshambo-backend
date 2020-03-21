@@ -1,5 +1,5 @@
 require('dotenv-safe').config()
-const { GAME_CONTRACT, TRON_PRIVATE_KEY } = process.env
+const { GAME_CONTRACT, TRON_PRIVATE_KEY, TRON_ADDRESS } = process.env
 
 const expect = require('chai').expect
 const io = require('socket.io-client')
@@ -240,6 +240,9 @@ describe('Server testing', async () => {
                 expect(e).to.eq('User not found')
             }
         })
+        it('Should register when clicking on login with crypto with a valid account', async () => {
+            
+        })
     })
 
     describe('Game setup and purchasing', async () => {
@@ -333,8 +336,8 @@ describe('Server testing', async () => {
 
         it('Should buy cards successfully given enough TRX', async () => {
             const socket1 = await socketAsync()
-            const privateKey = '2D71177215865124B97226580963C14AB6F53D538898648C65A831A7C3ABCF4F'
-            const account = 'TACgdnYe13EKuM8x4gk7kmd3Wn7wVDWVfF'
+            const privateKey = TRON_PRIVATE_KEY
+            const account = TRON_ADDRESS
             const user1 = {
                 email: 'example@gmail.com',
                 password: 'example',
@@ -366,8 +369,8 @@ describe('Server testing', async () => {
             const data = {
                 roomId: 'room0',
                 cardType: 'Rock',
-                privateKey: '2D71177215865124B97226580963C14AB6F53D538898648C65A831A7C3ABCF4F',
-                sender: 'TACgdnYe13EKuM8x4gk7kmd3Wn7wVDWVfF',
+                privateKey: TRON_PRIVATE_KEY,
+                sender: TRON_ADDRESS,
             }
             socket1.emit('game:card-placed', data)
             socket1.once('issue', e => {
@@ -379,14 +382,14 @@ describe('Server testing', async () => {
             const data1 = {
                 roomId: 'room0',
                 cardType: 'Scissors',
-                privateKey: '2D71177215865124B97226580963C14AB6F53D538898648C65A831A7C3ABCF4F',
-                sender: 'TACgdnYe13EKuM8x4gk7kmd3Wn7wVDWVfF',
+                privateKey: TRON_PRIVATE_KEY,
+                sender: TRON_ADDRESS,
             }
             const data2 = {
                 roomId: 'room0',
                 cardType: 'Paper',
-                privateKey: '2D71177215865124B97226580963C14AB6F53D538898648C65A831A7C3ABCF4F',
-                sender: 'TACgdnYe13EKuM8x4gk7kmd3Wn7wVDWVfF',
+                privateKey: TRON_PRIVATE_KEY,
+                sender: TRON_ADDRESS,
             }
             socket1.emit('game:card-placed', data1)
             socket2.emit('game:card-placed', data2)
@@ -424,8 +427,8 @@ describe('Server testing', async () => {
         it('Should delete the card placed successfully', async () => {
             // 1. Variables setup
             const {socket1, socket2} = await createAndJoin()
-            const privateKey = '2D71177215865124B97226580963C14AB6F53D538898648C65A831A7C3ABCF4F'
-            const sender = 'TACgdnYe13EKuM8x4gk7kmd3Wn7wVDWVfF'
+            const privateKey = TRON_PRIVATE_KEY
+            const sender = TRON_ADDRESS
             const data1 = {
                 roomId: 'room0',
                 cardType: 'Scissors',
@@ -441,9 +444,9 @@ describe('Server testing', async () => {
 
             // 2. Contract and trongrid setup
             const tronWeb = new TronWeb({
-                fullNode: 'https://api.shasta.trongrid.io',
-                solidityNode: 'https://api.shasta.trongrid.io',
-                eventServer: 'https://api.shasta.trongrid.io',
+                fullNode: 'https://api.trongrid.io',
+                solidityNode: 'https://api.trongrid.io',
+                eventServer: 'https://api.trongrid.io',
                 privateKey,
             })
             const tronGrid = new TronGrid(tronWeb)
@@ -534,7 +537,7 @@ describe('Server testing', async () => {
             }
         })
         // The strategy is to emit all draw events until a player uses all cards 8 vs 9 cards
-        it('Should make player one lose after using all cards', () => {
+        it('Should make player one lose after using all cards', async () => {
             const {socket1, socket2} = await createAndJoin(5)
             const data1 = {
                 roomId: 'room0',
@@ -573,7 +576,7 @@ describe('Server testing', async () => {
                 }
             }
         })
-        it('Should make a player win after the other uses all his cards', () => {
+        it('Should make a player win after the other uses all his cards', async () => {
             const {socket1, socket2} = await createAndJoin(9, 5)
             const data1 = {
                 roomId: 'room0',
