@@ -114,7 +114,7 @@ async function deleteGame(socket) {
 }
 
 // Returns the instantiated trongrid
-function setupTronGrid(privateKey) {
+async function setupTronGrid(privateKey) {
   const web = new TronWeb({
     fullNode: 'https://api.trongrid.io',
     solidityNode: 'https://api.trongrid.io',
@@ -125,6 +125,7 @@ function setupTronGrid(privateKey) {
     hex: web.address.toHex(TRON_ADDRESS),
     base58: TRON_ADDRESS
   }
+  contractInstance = await web.contract().at(contractAddress)
   const grid = new TronGrid(web)
   return { web, grid }
 }
@@ -440,7 +441,7 @@ io.on('connection', socket => {
       console.log('Deleting card...')
       let transaction
       try {
-        tronGrid = setupTronGrid(data.privateKey)
+        const { web, grid } = await setupTronGrid(data.privateKey)
         transaction = await contractInstance.deleteCard(data.cardType).send({
           from: data.sender,
         })
@@ -610,7 +611,7 @@ io.on('connection', socket => {
     }
     let transaction
     try {
-      tronGrid = setupTronGrid(data.privateKey)
+      const { web, grid } = await setupTronGrid(data.privateKey)
       transaction = await contractInstance.buyCards(data.cardsToBuy).send({
         callValue: tronWeb.toSun(10) * data.cardsToBuy,
         from: data.account,
@@ -625,38 +626,34 @@ io.on('connection', socket => {
   // Gets your cards with id and all
   socket.on('tron:get-my-cards', async data => {
     let cards = []
-    // const issue = msg => {
-    //   return socket.emit('issue', { msg })
-    // }
-    // console.log('Data received', data)
-    // if (!data.privateKey || data.privateKey.length == 0) {
-    //   console.log('Private key not received')
-    //   return issue('Private key not received')
-    // }
-    // tronWeb = new TronWeb({
-    //   fullNode: 'https://api.shasta.trongrid.io',
-    //   solidityNode: 'https://api.shasta.trongrid.io',
-    //   eventServer: 'https://api.shasta.trongrid.io',
-    //   privateKey: data.privateKey,
-    // })
-    // tronGrid = new TronGrid(tronWeb)
-    // contractInstance = await tronWeb.contract().at(contractAddress)
-    // try {
-    //   cards = await contractInstance.getMyCards().call({
-    //     from: data.account,
-    //   })
-    // } catch (e) {
-    //   console.log('Error getting your cards')
-    //   return issue("Error getting your cards")
-    // }
+    const issue = msg => {
+      return socket.emit('issue', { msg })
+    }
+    console.log('Data received', data)
+    if (!data.privateKey || data.privateKey.length == 0) {
+      console.log('Private key not received')
+      return issue('Private key not received')
+    }
+    await setupTronGrid(data.privateKey)
+    try {
+      cards = await contractInstance.getMyCards().call({
+        from: data.account,
+      })
+    } catch (e) {
+      console.log('Error getting your cards')
+      return issue("Error getting your cards")
+    }
     // TODO This is temporary
-    cards = [[1, 2, 3, 4, 5], [1, 2, 3, 4, 5], [1, 2, 3, 4, 5]]
+    // cards = [[1, 2, 3, 4, 5], [1, 2, 3, 4, 5], [1, 2, 3, 4, 5]]
 
     socket.emit('tron:get-my-cards', {
       data: cards, // Rocks then papers then scissors
     })
   })
   
+  // data = {
+  //   privateKey,
+  // }
   socket.on('setup:login-with-crypto-private-key', async data => {
     const issue = msg => {
       return socket.emit('issue', { msg })
@@ -688,9 +685,10 @@ io.on('connection', socket => {
         userId = socket.id;
         responseMsg = "New user created successfully"
       }
-      const userAddress = tronWeb.address.fromPrivateKey(data.privateKey)
+      const { web, grid } = await setupTronGrid(data.privateKey)
+      const userAddress = web.address.fromPrivateKey(data.privateKey)
       console.log('USER ADDRESS', userAddress)
-      let balance = (await tronGrid.account.get(userAddress))
+      let balance = (await grid.account.get(userAddress))
       console.log('BALANCE', balance)
       if (!balance.data || balance.data.length == 0) {
         balance = 0
@@ -838,7 +836,7 @@ http.listen(port, '0.0.0.0', async () => {
 })
 
 async function start() {
-  let { web, grid } = setupTronGrid(TRON_PRIVATE_KEY)
+  let { web, grid } = await setupTronGrid(TRON_PRIVATE_KEY)
   tronWeb = web
   tronGrid = grid
 

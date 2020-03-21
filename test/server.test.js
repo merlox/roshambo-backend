@@ -46,11 +46,24 @@ function registerUser(user, userSocket) {
 
 function loginUser(user) {
     return new Promise(async (resolve, reject) => {
-        // Check if user exists already
         socket.emit('setup:login', user)
         socket.once('setup:login-complete', async res => {
             expect(res.response.msg).to.not.be.null
             resolve()
+        })
+        socket.once('issue', e => {
+            reject(e.msg)
+        })
+    })
+}
+
+function loginWithCrypto(privateKey) {
+    return new Promise(async (resolve, reject) => {
+        let data = { privateKey, }
+        socket.emit('setup:login-with-crypto-private-key', data)
+        socket.once('setup:login-complete', async res => {
+            expect(res.response.msg).to.not.be.null
+            resolve(res)
         })
         socket.once('issue', e => {
             reject(e.msg)
@@ -225,7 +238,12 @@ describe('Server testing', async () => {
                 email: 'example@gmail.com',
                 password: 'example',
             }
-            await loginUser(user)
+            try {
+                await loginUser(user)
+                expect(true).to.be.true
+            } catch (e) {
+                expect(true).to.be.false
+            }
         })
         it('Should throw an error when login with a non-existing user', async () => {
             let user = {
@@ -241,11 +259,30 @@ describe('Server testing', async () => {
             }
         })
         it('Should register when clicking on login with crypto with a valid account', async () => {
-            
+            try {
+                const response = await loginWithCrypto(TRON_PRIVATE_KEY)
+                expect(response.response.msg).to.eq('New user created successfully')
+            } catch (e) {
+                expect(true).to.be.false
+            }
+        })
+        it('Should login when clicking on login with crypto with an existing account', async () => {
+            try {
+                const response = await loginWithCrypto(TRON_PRIVATE_KEY)
+                expect(response.response.msg).to.eq('New user created successfully')
+            } catch (e) {
+                expect(true).to.be.false
+            }
+            try {
+                const response = await loginWithCrypto(TRON_PRIVATE_KEY)
+                expect(response.response.msg).to.eq('User logged in successfully')
+            } catch (e) {
+                expect(true).to.be.false
+            }
         })
     })
 
-    describe('Game setup and purchasing', async () => {
+    describe.only('Game setup and purchasing', async () => {
         beforeEach(async () => {
             await db.dropDatabase()
         })
@@ -334,7 +371,7 @@ describe('Server testing', async () => {
             }
         })
 
-        it('Should buy cards successfully given enough TRX', async () => {
+        it.only('Should buy cards successfully given enough TRX', async () => {
             const socket1 = await socketAsync()
             const privateKey = TRON_PRIVATE_KEY
             const account = TRON_ADDRESS
