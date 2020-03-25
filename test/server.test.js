@@ -569,11 +569,7 @@ describe('Server testing', async () => {
 
             try {
                 const { socket, event, response } = await waitRound(socket1, socket2, data1, data2)
-                console.log('Socket', socket)
-                console.log('Event', event)
-                console.log('Response', response)
-
-                expect(true).to.be.true
+                expect(event).to.eq('game:round:winner-one')
             } catch (e) {
                 expect(true).to.be.false
             }
