@@ -1,5 +1,5 @@
 require('dotenv-safe').config()
-const { GAME_CONTRACT, TRON_PRIVATE_KEY, TRON_ADDRESS } = process.env
+const { GAME_CONTRACT, TRON_PRIVATE_KEY, TRON_PRIVATE_KEY_TWO, TRON_ADDRESS, TRON_ADDRESS_TWO } = process.env
 
 const expect = require('chai').expect
 const io = require('socket.io-client')
@@ -16,6 +16,14 @@ let newUser = {
     email: 'example@gmail.com',
     password: 'example',
     username: 'example',
+}
+
+function asyncTimeout(time) {
+    return new Promise(resolve => {
+        setTimeout(() => {
+            resolve()
+        }, time)
+    })
 }
 
 function registerUser(user, userSocket) {
@@ -41,6 +49,30 @@ function registerUser(user, userSocket) {
         usingSocket.once('issue', e => {
             reject(e.msg)
         })
+    })
+}
+
+function registerUserWithCrypto(privateKey, userSocket) {
+    return new Promise(async (resolve, reject) => {
+        // Check if user exists already
+        const foundUser = await db.collection('users').findOne({ privateKey })
+        // Delete before adding it
+        if (foundUser) {
+            await db.collection('users').deleteOne({ privateKey })
+        }
+        userSocket.once('setup:login-complete', async () => {
+            try {
+                const user = await db.collection('users').findOne({ privateKey })
+                expect(user).to.not.be.null
+                resolve()
+            } catch (e) {
+                reject(e)
+            }
+        })
+        userSocket.once('issue', e => {
+            reject(e.msg)
+        })
+        userSocket.emit('setup:login-with-crypto-private-key', { privateKey })
     })
 }
 
@@ -104,6 +136,56 @@ function socketAsync () {
             resolve(mySocket)
         }, 1e2)
     })
+}
+
+async function createAndJoinWithCrypto(cardsPlayer1, cardsPlayer2) {
+    let socket1 = await socketAsync()
+    let socket2 = await socketAsync()
+    let game1 = {
+        gameName: 'Example',
+        gameType: 'Rounds',
+        rounds: 9,
+        moveTimer: 99,
+        totalCardsPlayerOne: cardsPlayer1 || 9,
+    }
+    let game2 = {
+        playerOne: socket1.id,
+        playerTwo: socket2.id,
+        gameName: game1.gameName,
+        gameType: game1.gameType,
+        rounds: game1.rounds,
+        moveTimer: game1.moveTimer,
+        totalCardsPlayerTwo: cardsPlayer2 || 9,
+    }
+
+    try {
+        await registerUserWithCrypto(TRON_PRIVATE_KEY, socket1)
+    } catch (e) {
+        throw new Error(e)
+    }
+    try {
+        await registerUserWithCrypto(TRON_PRIVATE_KEY_TWO, socket2)
+    } catch (e) {
+        throw new Error(e)
+    }
+
+    try {
+        let response = await createGame(game1, socket1)
+        expect(response.msg).to.eq('The game has been created successfully')
+        let foundGame = await db.collection('games').findOne({playerOne: socket1.id})
+        expect(foundGame).to.not.be.null
+    } catch (e) {
+        expect(e).to.be.null
+    }
+    try {
+        let response = await joinGame(game2, socket2)
+        expect(response.roomId).to.not.be.null
+        expect(response.playerOne).to.eq(socket1.id)
+        expect(response.playerTwo).to.eq(socket2.id)
+    } catch (e) {
+        expect(e).to.be.null
+    }
+    return { socket1, socket2 }
 }
 
 async function createAndJoin(cardsPlayer1, cardsPlayer2) {
@@ -181,10 +263,10 @@ function emitAndWait(socket, emitted, dataToEmit, waitName) {
 
 function placeCard(socket, data) {
     return new Promise((resolve, reject) => {
-        socket.emit('game:card-placed', data)
         socket.once('game:card-placement-done', async msg => {
             resolve(msg)
         })
+        socket.emit('game:card-placed', data)
         socket.once('issue', async msg => {
             console.log('Issue 2', msg)
             reject(msg)
@@ -192,6 +274,62 @@ function placeCard(socket, data) {
     })
 }
 
+function waitRound(socket1, socket2, data1, data2) {
+    return new Promise(async (resolve, reject) => {
+        socket1.once('game:round:draw', async msg => {
+            resolve({
+                socket: 'one',
+                event: 'game:round:draw',
+                response: msg,
+            })
+        })
+        socket1.once('game:round:winner-one', async msg => {
+            resolve({
+                socket: 'one',
+                event: 'game:round:winner-two',
+                response: msg,
+            })
+        })
+        socket1.once('game:round:winner-two', async msg => {
+            resolve({
+                socket: 'one',
+                event: 'game:round:winner-two',
+                response: msg,
+            })
+        })
+        socket2.once('game:round:draw', async msg => {
+            resolve({
+                socket: 'two',
+                event: 'game:round:draw',
+                response: msg,
+            })
+        })
+        socket2.once('game:round:winner-one', async msg => {
+            resolve({
+                socket: 'two',
+                event: 'game:round:winner-one',
+                response: msg,
+            })
+        })
+        socket2.once('game:round:winner-two', async msg => {
+            resolve({
+                socket: 'two',
+                event: 'game:round:winner-two',
+                response: msg,
+            })
+        })
+        
+        await placeCard(socket1, data1)
+        await placeCard(socket2, data2)
+
+        socket1.once('issue', e => {
+            reject(e)
+        })
+        socket2.once('issue', e => {
+            reject(e)
+        })
+    })
+}
 
 describe('Server testing', async () => {
     before(async () => {
@@ -282,7 +420,7 @@ describe('Server testing', async () => {
         })
     })
 
-    describe.only('Game setup and purchasing', async () => {
+    describe('Game setup and purchasing', async () => {
         beforeEach(async () => {
             await db.dropDatabase()
         })
@@ -371,7 +509,7 @@ describe('Server testing', async () => {
             }
         })
 
-        it.only('Should buy cards successfully given enough TRX', async () => {
+        it('Should buy cards successfully given enough TRX', async () => {
             const socket1 = await socketAsync()
             const privateKey = TRON_PRIVATE_KEY
             const account = TRON_ADDRESS
@@ -397,7 +535,7 @@ describe('Server testing', async () => {
         })
     })
 
-    describe('Card placement', async () => {
+    describe.only('Card placement', async () => {
         beforeEach(async () => {
             await db.dropDatabase()
         })
@@ -414,8 +552,8 @@ describe('Server testing', async () => {
                 expect(e).to.be.null
             })
         })
-        it('Should place both cards and win player 1 successfully', async () => {
-            const {socket1, socket2} = await createAndJoin()
+        it.only('Should test a round, place both cards and win player 1 successfully', async () => {
+            const { socket1, socket2 } = await createAndJoinWithCrypto()
             const data1 = {
                 roomId: 'room0',
                 cardType: 'Scissors',
@@ -425,40 +563,20 @@ describe('Server testing', async () => {
             const data2 = {
                 roomId: 'room0',
                 cardType: 'Paper',
-                privateKey: TRON_PRIVATE_KEY,
-                sender: TRON_ADDRESS,
+                privateKey: TRON_PRIVATE_KEY_TWO,
+                sender: TRON_ADDRESS_TWO,
             }
-            socket1.emit('game:card-placed', data1)
-            socket2.emit('game:card-placed', data2)
-            socket1.once('issue', e => {
-                expect(e).to.be.null
-            })
-            socket2.once('issue', e => {
-                expect(e).to.be.null
-            })
-            socket1.once('game:round:draw', async msg => {
-                console.log('Message', msg)
-            })
-            socket1.once('game:round:winner-one', async msg => {
-                console.log('Message', msg)
-            })
-            socket1.once('game:round:winner-two', async msg => {
-                console.log('Message', msg)
-            })
 
-            // socket2.once('game:round:draw', async msg => {
-            //     console.log('Message 2', msg)
-            // })
-            // socket2.once('game:round:winner-one', async msg => {
-            //     console.log('Message 2', msg)
-            // })
-            // socket2.once('game:round:winner-two', async msg => {
-            //     console.log('Message 2', msg)
-            // })
-            await placeCard(socket2, data2)
-            // game:round:draw
-            // game:round:winner-one
-            // game:round:winner-two
+            try {
+                const { socket, event, response } = await waitRound(socket1, socket2, data1, data2)
+                console.log('Socket', socket)
+                console.log('Event', event)
+                console.log('Response', response)
+
+                expect(true).to.be.true
+            } catch (e) {
+                expect(true).to.be.false
+            }
         })
         // TODO finish the expect() event at the end
         it('Should delete the card placed successfully', async () => {

@@ -135,7 +135,7 @@ io.on('connection', socket => {
   socketIds.push(socket.id)
   // Logging middleware
   socket.use((package, next) => {
-    console.log('GET', package[0])
+    console.log('\nGET', package[0])
     next()
   })
   socket.on('disconnect', async () => {
@@ -289,7 +289,6 @@ io.on('connection', socket => {
       totalCardsPlayerOne: game.totalCardsPlayerOne,
       totalCardsPlayerTwo: data.totalCardsPlayerTwo,
     }
-    console.log('Latest league info', latestLeagueInfo)
     if (latestLeagueInfo) {
       room.leagueRocksInGame = parseInt(latestLeagueInfo[0]._hex)
       room.leaguePapersInGame = parseInt(latestLeagueInfo[1]._hex)
@@ -310,7 +309,7 @@ io.on('connection', socket => {
   //   roomId, cardType, privateKey, sender
   // }
   socket.on('game:card-placed', async data => {
-    console.log('Card placed called')
+    console.log('Card placed called', data)
 
     let lastCardPlacedByPlayer
     const game = gameRooms.find(room => room.roomId == data.roomId)
@@ -484,10 +483,15 @@ io.on('connection', socket => {
       socket.emit('game:card-placement-done', {
         msg: 'The card has been placed successfully'
       })
+
       const isThereAWinner = checkFinishGame()
       if (isThereAWinner) return
       else return emitRoundOver(winnerText)
     }
+
+    socket.emit('game:card-placement-done', {
+      msg: 'The card has been placed successfully'
+    })
     // If only one card is placed, do nothing and wait for the opponent
   })
   socket.on('game:join-private-game', async data => {
@@ -689,13 +693,12 @@ io.on('connection', socket => {
       const userAddress = web.address.fromPrivateKey(data.privateKey)
       console.log('USER ADDRESS', userAddress)
       let balance = (await grid.account.get(userAddress))
-      console.log('BALANCE', balance)
       if (!balance.data || balance.data.length == 0) {
         balance = 0
       } else {
         balance = balance.data[0].balance
       }
-      console.log('Balance', balance)
+      console.log('BALANCE', balance)
       socket['user'] = {
         userId,
         userAddress,
