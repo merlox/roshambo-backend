@@ -535,7 +535,7 @@ describe('Server testing', async () => {
         })
     })
 
-    describe.only('Card placement', async () => {
+    describe('Card placement', async () => {
         beforeEach(async () => {
             await db.dropDatabase()
         })
@@ -552,7 +552,7 @@ describe('Server testing', async () => {
                 expect(e).to.be.null
             })
         })
-        it.only('Should test a round, place both cards and win player 1 successfully', async () => {
+        it('Should test a round, place both cards and win player 1 successfully', async () => {
             const { socket1, socket2 } = await createAndJoinWithCrypto()
             const data1 = {
                 roomId: 'room0',
