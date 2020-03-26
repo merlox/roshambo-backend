@@ -277,7 +277,6 @@ function placeCard(socket, data) {
 function waitRound(socket1, socket2, data1, data2) {
     return new Promise(async (resolve, reject) => {
         socket1.once('game:round:draw', async msg => {
-            console.log('---------------------------------------------------------')
             resolve({
                 socket: 'one',
                 event: 'game:round:draw',
@@ -285,7 +284,6 @@ function waitRound(socket1, socket2, data1, data2) {
             })
         })
         socket1.once('game:round:winner-one', async msg => {
-            console.log('---------------------------------------------------------')
             resolve({
                 socket: 'one',
                 event: 'game:round:winner-two',
@@ -293,7 +291,6 @@ function waitRound(socket1, socket2, data1, data2) {
             })
         })
         socket1.once('game:round:winner-two', async msg => {
-            console.log('---------------------------------------------------------')
             resolve({
                 socket: 'one',
                 event: 'game:round:winner-two',
@@ -301,7 +298,6 @@ function waitRound(socket1, socket2, data1, data2) {
             })
         })
         socket2.once('game:round:draw', async msg => {
-            console.log('---------------------------------------------------------')
             resolve({
                 socket: 'two',
                 event: 'game:round:draw',
@@ -309,7 +305,6 @@ function waitRound(socket1, socket2, data1, data2) {
             })
         })
         socket2.once('game:round:winner-one', async msg => {
-            console.log('---------------------------------------------------------')
             resolve({
                 socket: 'two',
                 event: 'game:round:winner-one',
@@ -317,7 +312,6 @@ function waitRound(socket1, socket2, data1, data2) {
             })
         })
         socket2.once('game:round:winner-two', async msg => {
-            console.log('---------------------------------------------------------')
             resolve({
                 socket: 'two',
                 event: 'game:round:winner-two',
@@ -325,11 +319,8 @@ function waitRound(socket1, socket2, data1, data2) {
             })
         })
         
-        console.log('PLACING FIRST CARD')
         await placeCard(socket1, data1)
-        console.log('PLACING SECOND CARD')
         await placeCard(socket2, data2)
-        console.log('PLACEMENT DONE')
 
         socket1.once('issue', e => {
             reject(e)
@@ -562,15 +553,12 @@ describe('Server testing', async () => {
             }
             socket1.emit('game:card-placed', data)
             socket1.once('issue', e => {
-                console.log('ISSUE', e)
                 expect(true).to.be.false
             })
-            console.log(`room${lastRoomId}`)
             lastRoomId++
         })
         it('Should test a round, place both cards and win player 1 successfully', async () => {
             const { socket1, socket2 } = await createAndJoinWithCrypto()
-            console.log('Room', `room${lastRoomId}`)
             const data1 = {
                 roomId: `room${lastRoomId}`,
                 cardType: 'Scissors',
