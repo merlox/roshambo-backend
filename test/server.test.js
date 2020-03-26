@@ -277,6 +277,7 @@ function placeCard(socket, data) {
 function waitRound(socket1, socket2, data1, data2) {
     return new Promise(async (resolve, reject) => {
         socket1.once('game:round:draw', async msg => {
+            console.log('---------------------------------------------------------')
             resolve({
                 socket: 'one',
                 event: 'game:round:draw',
@@ -284,6 +285,7 @@ function waitRound(socket1, socket2, data1, data2) {
             })
         })
         socket1.once('game:round:winner-one', async msg => {
+            console.log('---------------------------------------------------------')
             resolve({
                 socket: 'one',
                 event: 'game:round:winner-two',
@@ -291,6 +293,7 @@ function waitRound(socket1, socket2, data1, data2) {
             })
         })
         socket1.once('game:round:winner-two', async msg => {
+            console.log('---------------------------------------------------------')
             resolve({
                 socket: 'one',
                 event: 'game:round:winner-two',
@@ -298,6 +301,7 @@ function waitRound(socket1, socket2, data1, data2) {
             })
         })
         socket2.once('game:round:draw', async msg => {
+            console.log('---------------------------------------------------------')
             resolve({
                 socket: 'two',
                 event: 'game:round:draw',
@@ -305,6 +309,7 @@ function waitRound(socket1, socket2, data1, data2) {
             })
         })
         socket2.once('game:round:winner-one', async msg => {
+            console.log('---------------------------------------------------------')
             resolve({
                 socket: 'two',
                 event: 'game:round:winner-one',
@@ -312,6 +317,7 @@ function waitRound(socket1, socket2, data1, data2) {
             })
         })
         socket2.once('game:round:winner-two', async msg => {
+            console.log('---------------------------------------------------------')
             resolve({
                 socket: 'two',
                 event: 'game:round:winner-two',
@@ -319,8 +325,11 @@ function waitRound(socket1, socket2, data1, data2) {
             })
         })
         
+        console.log('PLACING FIRST CARD')
         await placeCard(socket1, data1)
+        console.log('PLACING SECOND CARD')
         await placeCard(socket2, data2)
+        console.log('PLACEMENT DONE')
 
         socket1.once('issue', e => {
             reject(e)
@@ -331,6 +340,7 @@ function waitRound(socket1, socket2, data1, data2) {
     })
 }
 
+let lastRoomId = 0
 describe('Server testing', async () => {
     before(async () => {
         client = new MongoClient(mongoUrl, {
@@ -338,6 +348,7 @@ describe('Server testing', async () => {
         })
         await client.connect()
         db = client.db('roshambo')
+        await asyncTimeout(3e3)
     })
 
     it('Should connect 3 clients simultaneously', async () => {
@@ -507,6 +518,8 @@ describe('Server testing', async () => {
             } catch (e) {
                 expect(e).to.be.null
             }
+
+            lastRoomId++
         })
 
         it('Should buy cards successfully given enough TRX', async () => {
@@ -540,28 +553,32 @@ describe('Server testing', async () => {
             await db.dropDatabase()
         })
         it('Should place a card successfully', async () => {
-            const {socket1, socket2} = await createAndJoin()
+            const {socket1, socket2} = await createAndJoinWithCrypto(10, 20)
             const data = {
-                roomId: 'room0',
+                roomId: `room${lastRoomId}`,
                 cardType: 'Rock',
                 privateKey: TRON_PRIVATE_KEY,
                 sender: TRON_ADDRESS,
             }
             socket1.emit('game:card-placed', data)
             socket1.once('issue', e => {
-                expect(e).to.be.null
+                console.log('ISSUE', e)
+                expect(true).to.be.false
             })
+            console.log(`room${lastRoomId}`)
+            lastRoomId++
         })
         it('Should test a round, place both cards and win player 1 successfully', async () => {
             const { socket1, socket2 } = await createAndJoinWithCrypto()
+            console.log('Room', `room${lastRoomId}`)
             const data1 = {
-                roomId: 'room0',
+                roomId: `room${lastRoomId}`,
                 cardType: 'Scissors',
                 privateKey: TRON_PRIVATE_KEY,
                 sender: TRON_ADDRESS,
             }
             const data2 = {
-                roomId: 'room0',
+                roomId: `room${lastRoomId}`,
                 cardType: 'Paper',
                 privateKey: TRON_PRIVATE_KEY_TWO,
                 sender: TRON_ADDRESS_TWO,
@@ -573,21 +590,68 @@ describe('Server testing', async () => {
             } catch (e) {
                 expect(true).to.be.false
             }
+            lastRoomId++
+        })
+        it('Should test a round, place both cards and win player 2 successfully', async () => {
+            const { socket1, socket2 } = await createAndJoinWithCrypto()
+            const data1 = {
+                roomId: `room${lastRoomId}`,
+                cardType: 'Rock',
+                privateKey: TRON_PRIVATE_KEY,
+                sender: TRON_ADDRESS,
+            }
+            const data2 = {
+                roomId: `room${lastRoomId}`,
+                cardType: 'Paper',
+                privateKey: TRON_PRIVATE_KEY_TWO,
+                sender: TRON_ADDRESS_TWO,
+            }
+
+            try {
+                const { socket, event, response } = await waitRound(socket1, socket2, data1, data2)
+                expect(event).to.eq('game:round:winner-two')
+            } catch (e) {
+                expect(true).to.be.false
+            }
+            lastRoomId++
+        })
+        it('Should test a round, place both cards and get a draw successfully', async () => {
+            const { socket1, socket2 } = await createAndJoinWithCrypto()
+            const data1 = {
+                roomId: `room${lastRoomId}`,
+                cardType: 'Rock',
+                privateKey: TRON_PRIVATE_KEY,
+                sender: TRON_ADDRESS,
+            }
+            const data2 = {
+                roomId: `room${lastRoomId}`,
+                cardType: 'Rock',
+                privateKey: TRON_PRIVATE_KEY_TWO,
+                sender: TRON_ADDRESS_TWO,
+            }
+
+            try {
+                const { socket, event, response } = await waitRound(socket1, socket2, data1, data2)
+                expect(event).to.eq('game:round:draw')
+            } catch (e) {
+                expect(true).to.be.false
+            }
+            lastRoomId++
         })
         // TODO finish the expect() event at the end
-        it('Should delete the card placed successfully', async () => {
+        xit('Should delete the card placed successfully', async () => {
             // 1. Variables setup
             const {socket1, socket2} = await createAndJoin()
             const privateKey = TRON_PRIVATE_KEY
             const sender = TRON_ADDRESS
             const data1 = {
-                roomId: 'room0',
+                roomId: `room${lastRoomId}`,
                 cardType: 'Scissors',
                 privateKey,
                 sender,
             }
             const data2 = {
-                roomId: 'room0',
+                roomId: `room${lastRoomId}`,
                 cardType: 'Paper',
                 privateKey,
                 sender,
@@ -645,18 +709,19 @@ describe('Server testing', async () => {
             // transaction = await contractInstance.deleteCard(data.cardType).send({
             //     from: data.sender,
             // })
+            lastRoomId++
         })
 
-        it('Should end a game successfully as a draw event after all 9 rounds', async () => {
+        xit('Should end a game successfully as a draw event after all 9 rounds', async () => {
             const {socket1, socket2} = await createAndJoin()
             const data1 = {
-                roomId: 'room0',
+                roomId: `room${lastRoomId}`,
                 cardType: 'Scissors',
                 privateKey,
                 sender,
             }
             const data2 = {
-                roomId: 'room0',
+                roomId: `room${lastRoomId}`,
                 cardType: 'Scissors',
                 privateKey,
                 sender,
@@ -686,18 +751,19 @@ describe('Server testing', async () => {
                     await placeCard(socket2, data2)
                 }
             }
+            lastRoomId++
         })
         // The strategy is to emit all draw events until a player uses all cards 8 vs 9 cards
-        it('Should make player one lose after using all cards', async () => {
+        xit('Should make player one lose after using all cards', async () => {
             const {socket1, socket2} = await createAndJoin(5)
             const data1 = {
-                roomId: 'room0',
+                roomId: `room${lastRoomId}`,
                 cardType: 'Scissors',
                 privateKey,
                 sender,
             }
             const data2 = {
-                roomId: 'room0',
+                roomId: `room${lastRoomId}`,
                 cardType: 'Scissors',
                 privateKey,
                 sender,
@@ -726,17 +792,18 @@ describe('Server testing', async () => {
                     await placeCard(socket2, data2)
                 }
             }
+            lastRoomId++
         })
-        it('Should make a player win after the other uses all his cards', async () => {
+        xit('Should make a player win after the other uses all his cards', async () => {
             const {socket1, socket2} = await createAndJoin(9, 5)
             const data1 = {
-                roomId: 'room0',
+                roomId: `room${lastRoomId}`,
                 cardType: 'Scissors',
                 privateKey,
                 sender,
             }
             const data2 = {
-                roomId: 'room0',
+                roomId: `room${lastRoomId}`,
                 cardType: 'Scissors',
                 privateKey,
                 sender,
@@ -765,6 +832,7 @@ describe('Server testing', async () => {
                     await placeCard(socket2, data2)
                 }
             }
+            lastRoomId++
         })
     })
 })

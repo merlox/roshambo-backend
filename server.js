@@ -309,10 +309,12 @@ io.on('connection', socket => {
   //   roomId, cardType, privateKey, sender
   // }
   socket.on('game:card-placed', async data => {
-    console.log('Card placed called', data)
-
     let lastCardPlacedByPlayer
+    console.log('Rooms', gameRooms)
+    console.log('ROOM ID', data.roomId)
+    console.log('SOCKETID', socket.id)
     const game = gameRooms.find(room => room.roomId == data.roomId)
+    
     if (!game) return issue('Game not found')
     clearTimeout(game.timeout)
     const timer = (parseInt(game.moveTimer) + 2) * 1e3
@@ -430,9 +432,11 @@ io.on('connection', socket => {
     if (socket.id == game.playerOne) {
       game.playerOneActive = data.cardType
       lastCardPlacedByPlayer = 'one'
-    } else {
+    } else if (socket.id == game.playerTwo) {
       game.playerTwoActive = data.cardType
       lastCardPlacedByPlayer = 'two'
+    } else {
+      return issue('The player socket id is not in the game')
     }
 
     async function deleteCard() {
@@ -452,6 +456,9 @@ io.on('connection', socket => {
     }
 
     await deleteCard()
+
+    console.log(game.playerOneActive)
+    console.log(game.playerTwoActive)
 
     // If both cards are placed, calculate result
     if (game.playerOneActive && game.playerTwoActive) {
@@ -484,10 +491,14 @@ io.on('connection', socket => {
         msg: 'The card has been placed successfully'
       })
 
+      console.log('FINISH 1')
+
       const isThereAWinner = checkFinishGame()
       if (isThereAWinner) return
       else return emitRoundOver(winnerText)
     }
+
+    console.log('FINISH 2')
 
     socket.emit('game:card-placement-done', {
       msg: 'The card has been placed successfully'
