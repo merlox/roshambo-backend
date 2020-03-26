@@ -4,9 +4,9 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "start": "node server.js",
+    "start": "node server.js -p 80",
     "test": "TEST_ENV=true yarn open-test-server && mocha --timeout 10000 --exit",
-    "open-test-server": "osascript -e 'tell app \"Terminal\" to do script \"cd /Users/merunas/Desktop/roshambo-backend && yarn start -p 80\"'"
+    "open-test-server": "osascript -e 'tell app \"Terminal\" to do script \"cd /Users/merunas/Desktop/roshambo-backend && yarn start\"'"
   },
   "keywords": [],
   "author": "",

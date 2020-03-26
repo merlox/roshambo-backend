@@ -516,19 +516,37 @@ describe('Server testing', async () => {
         it('Should buy cards successfully given enough TRX', async () => {
             const socket1 = await socketAsync()
             const privateKey = TRON_PRIVATE_KEY
-            const account = TRON_ADDRESS
-            const user1 = {
-                email: 'example@gmail.com',
-                password: 'example',
-                username: 'example',
-            }
+            const sender = TRON_ADDRESS
             const data1 = {
-                cardsToBuy: 10,
-                account,
+                cardsToBuy: 3,
+                sender,
                 privateKey,
             }
+            const tronWeb = new TronWeb({
+                fullNode: 'https://api.trongrid.io',
+                solidityNode: 'https://api.trongrid.io',
+                eventServer: 'https://api.trongrid.io',
+                privateKey,
+            })
+            tronWeb.defaultAddress = {
+                hex: tronWeb.address.toHex(sender),
+                base58: sender,
+            }
+            const contractInstance = await tronWeb.contract().at(GAME_CONTRACT)
+            // Getting initial cards
+            let initialCards = []
+            let finalCards = []
             try {
-                await registerUser(user1, socket1)
+              initialCards = await contractInstance.getMyCards().call({
+                from: sender,
+              })
+            } catch (e) {
+              console.log('Error getting your cards')
+              expect(e).to.be.null
+            }
+
+            try {
+                await registerUserWithCrypto(privateKey, socket1)
             } catch (e) {
                 throw new Error(e)
             }
@@ -536,6 +554,27 @@ describe('Server testing', async () => {
             socket1.once('tron:buy-cards-complete', () => {
                 expect(true).to.be.true
             })
+
+            // For good measure, we add a waiting time here
+            await asyncTimeout(2e3)
+
+            // Check if the card has been added
+            try {
+                finalCards = await contractInstance.getMyCards().call({
+                    from: sender,
+                })
+            } catch (e) {
+                console.log('Error getting your cards')
+                expect(e).to.be.null
+            }
+
+            // Count all the cards and see if the new ones have been added
+            let countInitial = 0
+            initialCards.map(arr => arr.map(() => countInitial++))
+            let countFinal = 0
+            finalCards.map(arr => arr.map(() => countFinal++))
+
+            expect(countFinal).to.eq(countInitial + data1.cardsToBuy)
         })
     })
 
