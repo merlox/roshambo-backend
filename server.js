@@ -86,6 +86,9 @@ let socketIds = []
 let socketGames = []
 // Active games played by people in a room
 let gameRooms = []
+// A list of active timeouts running for each game
+// Has to be an object to access them easily
+let timeouts = {}
 
 async function deleteGame(socket) {
   const index = socketIds.indexOf(socket.id)
@@ -310,16 +313,14 @@ io.on('connection', socket => {
   // }
   socket.on('game:card-placed', async data => {
     let lastCardPlacedByPlayer
-    console.log('Rooms', gameRooms)
-    console.log('ROOM ID', data.roomId)
-    console.log('SOCKETID', socket.id)
     const game = gameRooms.find(room => room.roomId == data.roomId)
-    
     if (!game) return issue('Game not found')
-    clearTimeout(game.timeout)
+
+    clearTimeout(timeouts[game.roomId])
     const timer = (parseInt(game.moveTimer) + 2) * 1e3
     let counter = new Date().getTime()
-    game.timeout = setTimeout(() => {
+
+    timeouts[game.roomId] = setTimeout(() => {
       console.log('Timeout called after', new Date().getTime() - counter, 'seconds')
       if (lastCardPlacedByPlayer == 'one') {
         return send('game:finish:winner-player-one')
@@ -369,7 +370,6 @@ io.on('connection', socket => {
         msg.papers = parseInt(latestLeagueInfo[1]._hex)
         msg.scissors = parseInt(latestLeagueInfo[2]._hex)
       }
-      console.log('League info', latestLeagueInfo)
       socket.emit(`game:round:${result}`, msg)
       io.to(socket.id == game.playerOne ? game.playerTwo : game.playerOne)
         .emit(`game:round:${result}`, msg)
@@ -457,9 +457,6 @@ io.on('connection', socket => {
 
     await deleteCard()
 
-    console.log(game.playerOneActive)
-    console.log(game.playerTwoActive)
-
     // If both cards are placed, calculate result
     if (game.playerOneActive && game.playerTwoActive) {
       game.cardsUsedPlayerOne++
@@ -491,15 +488,10 @@ io.on('connection', socket => {
         msg: 'The card has been placed successfully'
       })
 
-      console.log('FINISH 1')
-
       const isThereAWinner = checkFinishGame()
       if (isThereAWinner) return
       else return emitRoundOver(winnerText)
     }
-
-    console.log('FINISH 2')
-
     socket.emit('game:card-placement-done', {
       msg: 'The card has been placed successfully'
     })
