@@ -13,7 +13,7 @@
   "license": "ISC",
   "dependencies": {
     "@bitsler/tron-address": "^1.0.0",
-    "bcrypt": "^3.0.6",
+    "bcrypt": "^5.0.0",
     "bip39": "^3.0.2",
     "body-parser": "^1.19.0",
     "chai": "^4.2.0",
